@@ -57,12 +57,17 @@ public:
     void set_aspect(int mode);
 
     // Subtitles: add a local subtitle file and select+show it; or hide any subtitle.
-    void add_subtitle(const std::string& path);
+    // font: caption font family ("" = mpv's default sans-serif); e.g. the bundled
+    // CJK font for Japanese tracks, which the device's fontconfig may not provide.
+    void add_subtitle(const std::string& path, const std::string& font = "");
     void subtitles_off();
     // Caption rendering: size 0 small / 1 medium / 2 large; style 0 white,
     // 1 yellow, 2 white-on-black, 3 black-on-white, 4 yellow-on-black,
     // 5 yellow-on-blue. Applied live and remembered for subsequent play()s.
     void set_caption_style(int size, int style);
+    // Extra font directory for the caption renderer (libass); applies to the
+    // next video. Fonts there are found by family name without fontconfig.
+    void set_fonts_dir(const std::string& dir);
 
     bool active() const;      // a file is loaded
     bool paused() const;

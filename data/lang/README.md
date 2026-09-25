@@ -14,8 +14,10 @@ Anything missing falls back to English, so partial files are fine.
 1. Copy `en.json` to `<code>.json` and translate the values.
 2. Add an entry to `languages.json`:
    `{ "code": "<code>", "name": "<endonym>", "hl": "<yt-lang>", "gl": "<yt-country>" }`
-3. The bundled font (DejaVuSans) covers Latin, Cyrillic, and Greek. Other scripts
-   (CJK, Arabic, Indic) need a different font and, for some, text shaping.
+3. The bundled fonts cover Latin, Cyrillic, and Greek (DejaVuSans) plus Japanese
+   (`data/fonts/NotoSansCJKjp-Subset.otf`: kana + the JIS X 0208 kanji). Chinese or
+   Korean need a wider CJK subset (`tools/make_cjk_font.sh`); Arabic and Indic
+   scripts also need text shaping, which the renderer doesn't do.
 
 ## Keys
 The keys are fixed identifiers used in the code (`i18n::Str`). English is also baked

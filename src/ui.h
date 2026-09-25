@@ -130,6 +130,7 @@ public:
     void on_resize();                   // re-bake fonts for the new window height
     void toggle_view();                 // cycle browse view (Grid -> Carousel -> 3D -> Coverflow)
     void cycle_tab(int dir);            // L/R shoulders: switch channel/Home tab
+    void seek_chapter(int dir);          // L/R shoulders while playing: previous/next chapter
     enum class ViewMode { Grid, Carousel, Carousel3D, Coverflow };
     bool in_subview() const { return in_channel_view_; }   // channel/playlist view active?
     bool menu_open() const { return menu_open_; }
@@ -306,9 +307,8 @@ private:
     // Result of a background resolve (URLs copied out so no Format* dangles).
     struct ResolveResult {
         bool ok = false;
-        bool paced = false;        // restricted delivery: ranges beyond a ~20MiB
-                                   // sliding window 403 (some videos, e.g. kids
-                                   // content) — seeking must be clamped
+        bool paced = false;        // made-for-kids restricted delivery: ranges beyond
+                                   // a sliding window 403, so seeking must be clamped
         long video_bitrate = 0;    // bits/s of the chosen video format
         std::string status, video_url, audio_url, user_agent, title, description;
         std::string audio_lang;    // track_lang of the chosen audio ("" = single-audio)
@@ -333,6 +333,7 @@ private:
     std::mutex desc_m_;
     std::string desc_pending_, desc_pending_id_;
     std::string now_playing_desc_;          // free copy from the playback resolve
+    std::vector<double> now_playing_chapters_; // timestamped chapters parsed from description
 
     // Comments overlay (over the grid or the player). Scrollable; pages on demand.
     bool comments_open_ = false, comments_loading_ = false, comments_paused_ = false;

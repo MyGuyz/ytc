@@ -528,9 +528,12 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (std::getenv("YTC_DESCSHOT")) {  // description overlay: long-title wrapping
-            app.test_show_description(
+            // YTC_DESCTITLE / YTC_DESCBODY override the text (e.g. CJK wrapping).
+            const char* t = std::getenv("YTC_DESCTITLE");
+            const char* b = std::getenv("YTC_DESCBODY");
+            app.test_show_description(t ? t :
                 "This is a really long video title that should wrap onto the next line to the left instead of being cut off with an ellipsis",
-                "Here is the description body text. It sits below the wrapped title and scrolls independently.\n\nSecond paragraph.");
+                b ? b : "Here is the description body text. It sits below the wrapped title and scrolls independently.\n\nSecond paragraph.");
             app.render(rn); win->screenshot(std::string(shot) + "_desc.png");
             std::fprintf(stderr, "DESCSHOT done\n");
             return 0;
@@ -1170,9 +1173,11 @@ int main(int argc, char** argv) {
                 } else if (k == SDLK_v) {
                     app.toggle_view();               // grid <-> carousel
                 } else if (k == SDLK_q) {
-                    app.cycle_tab(-1);               // keyboard L-shoulder: prev tab
+                    if (app.mode() == M::Playing) app.seek_chapter(-1);
+                    else app.cycle_tab(-1);           // keyboard L-shoulder: prev tab/chapter
                 } else if (k == SDLK_e) {
-                    app.cycle_tab(+1);               // keyboard R-shoulder: next tab
+                    if (app.mode() == M::Playing) app.seek_chapter(+1);
+                    else app.cycle_tab(+1);           // keyboard R-shoulder: next tab/chapter
                 } else {
                     handle(map_key(k));
                 }
@@ -1196,8 +1201,12 @@ int main(int argc, char** argv) {
                 else if (b == SDL_CONTROLLER_BUTTON_START) {                    // Start = top-level menu
                     if (app.menu_open()) app.input(A::Back); else app.open_main_menu();
                 }
-                else if (b == SDL_CONTROLLER_BUTTON_LEFTSHOULDER)  app.cycle_tab(-1);  // L = prev tab
-                else if (b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) app.cycle_tab(+1);  // R = next tab
+                else if (b == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
+                    if (app.mode() == M::Playing) app.seek_chapter(-1); else app.cycle_tab(-1);
+                }
+                else if (b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) {
+                    if (app.mode() == M::Playing) app.seek_chapter(+1); else app.cycle_tab(+1);
+                }
                 else handle(map_button(b));
                 start_hold(b);   // begin hold-to-seek / hold-to-navigate as appropriate
             }

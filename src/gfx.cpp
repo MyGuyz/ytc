@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <mutex>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "../third_party/stb_image.h"
@@ -58,11 +59,17 @@ void Texture::update(int x, int y, int w, int h, const uint8_t* rgba) {
     glBindTexture(GL_TEXTURE_2D, id_);
     glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
 }
+void Texture::reset_empty(int w, int h) {
+    if (!id_) return;
+    std::vector<uint8_t> zero(w * h * 4, 0);
+    glBindTexture(GL_TEXTURE_2D, id_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, zero.data());
+    w_ = w; h_ = h;
+}
 
 // ---------- Font (UTF-8, on-demand glyph cache) ----------
 
-// Decode one UTF-8 codepoint starting at s[i]; advances i. Bad bytes -> U+FFFD.
-static uint32_t utf8_next(const std::string& s, size_t& i) {
+uint32_t utf8_next(const std::string& s, size_t& i) {
     uint8_t c = (uint8_t)s[i];
     if (c < 0x80) { i += 1; return c; }
     if ((c >> 5) == 0x6 && i + 1 < s.size()) {
@@ -92,14 +99,30 @@ static bool is_emoji_like(uint32_t cp) {
            cp == 0x200D || cp == 0x20E3;             // ZWJ, combining keycap
 }
 
-std::unique_ptr<Font> Font::load(const std::string& path, float pixel_h) {
+// Font file bytes, shared by every Font loaded from the same path: the UI loads
+// three sizes, and without this each would hold its own copy of the CJK font.
+static std::shared_ptr<const std::vector<uint8_t>> read_font_file(const std::string& path) {
+    static std::mutex m;
+    static std::unordered_map<std::string, std::weak_ptr<const std::vector<uint8_t>>> cache;
+    std::lock_guard<std::mutex> lk(m);
+    if (auto sp = cache[path].lock()) return sp;
     std::ifstream f(path, std::ios::binary);
     if (!f) return nullptr;
+    auto bytes = std::make_shared<std::vector<uint8_t>>(
+        (std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    if (bytes->empty()) return nullptr;
+    cache[path] = bytes;
+    return bytes;
+}
+
+std::unique_ptr<Font> Font::load(const std::string& path, float pixel_h,
+                                 const std::string& fallback_path) {
     auto font = std::make_unique<Font>();
-    font->ttf_.assign((std::istreambuf_iterator<char>(f)), {});
+    font->ttf_ = read_font_file(path);
+    if (!font->ttf_) return nullptr;
     auto* info = new stbtt_fontinfo();
-    if (!stbtt_InitFont(info, font->ttf_.data(),
-                        stbtt_GetFontOffsetForIndex(font->ttf_.data(), 0))) {
+    if (!stbtt_InitFont(info, font->ttf_->data(),
+                        stbtt_GetFontOffsetForIndex(font->ttf_->data(), 0))) {
         delete info;
         return nullptr;
     }
@@ -111,17 +134,41 @@ std::unique_ptr<Font> Font::load(const std::string& path, float pixel_h) {
     font->line_h_ = (asc - desc + gap) * font->scale_;
     font->atlas_w_ = font->atlas_h_ = 1024;
     font->atlas_ = Texture::create_empty(font->atlas_w_, font->atlas_h_);
+    if (!fallback_path.empty()) {
+        if (auto fb = read_font_file(fallback_path)) {
+            auto* fi = new stbtt_fontinfo();
+            if (stbtt_InitFont(fi, fb->data(), stbtt_GetFontOffsetForIndex(fb->data(), 0))) {
+                // Same em size as the primary (how browsers mix CJK into Latin text),
+                // not the same pixel height: CJK fonts have much taller ascent+descent,
+                // so matching pixel height would shrink the ideographs.
+                float em_px = font->scale_ / stbtt_ScaleForMappingEmToPixels(info, 1.0f);
+                font->fb_scale_ = stbtt_ScaleForMappingEmToPixels(fi, em_px);
+                font->fb_ttf_ = std::move(fb);
+                font->fb_info_ = fi;
+            } else {
+                delete fi;
+            }
+        }
+    }
     return font;
 }
-Font::~Font() { delete static_cast<stbtt_fontinfo*>(info_); }
+Font::~Font() {
+    delete static_cast<stbtt_fontinfo*>(info_);
+    delete static_cast<stbtt_fontinfo*>(fb_info_);
+}
 
 const Font::Glyph* Font::glyph(uint32_t cp) const {
     auto it = glyphs_.find(cp);
     if (it != glyphs_.end()) return it->second.w < 0 ? nullptr : &it->second;
     auto* info = static_cast<const stbtt_fontinfo*>(info_);
+    float scale = scale_;
     int gi = stbtt_FindGlyphIndex(info, (int)cp);
+    if (gi == 0 && fb_info_) {
+        auto* fb = static_cast<const stbtt_fontinfo*>(fb_info_);
+        if (int fg = stbtt_FindGlyphIndex(fb, (int)cp)) { info = fb; gi = fg; scale = fb_scale_; }
+    }
     if (gi == 0) {
-        // Not in the font. Emoji-ish -> skip; otherwise show a tofu box (U+25A1).
+        // Not in either font. Emoji-ish -> skip; otherwise show a tofu box (U+25A1).
         if (!is_emoji_like(cp) && cp != 0x25A1) {
             if (const Glyph* tofu = glyph(0x25A1)) {
                 glyphs_[cp] = *tofu;
@@ -135,19 +182,29 @@ const Font::Glyph* Font::glyph(uint32_t cp) const {
     int adv, lsb;
     stbtt_GetGlyphHMetrics(info, gi, &adv, &lsb);
     int x0, y0, x1, y1;
-    stbtt_GetGlyphBitmapBox(info, gi, scale_, scale_, &x0, &y0, &x1, &y1);
+    stbtt_GetGlyphBitmapBox(info, gi, scale, scale, &x0, &y0, &x1, &y1);
     int gw = x1 - x0, gh = y1 - y0;
 
     if (pen_x_ + gw + 1 > atlas_w_) { pen_x_ = 1; pen_y_ += row_h_ + 1; row_h_ = 0; }
     if (pen_y_ + gh + 1 > atlas_h_) {
-        // Atlas full (rare): restart packing; evicted glyphs re-cache lazily.
+        // Atlas full. Latin/Cyrillic/Greek never get here; a screen of Japanese
+        // (titles + description + comments) can hold 1000+ distinct kanji, which
+        // overflows 1024^2 at larger sizes. First time: grow to 2048^2 so it stops
+        // thrashing; after that restart packing. Either way cached glyphs
+        // re-rasterize lazily (text already batched this frame may blank for a frame).
         glyphs_.clear();
         pen_x_ = pen_y_ = 1; row_h_ = 0;
+        GLint max_tex = 0;
+        glGetIntegerv(GL_MAX_TEXTURE_SIZE, &max_tex);
+        if (atlas_w_ < 2048 && max_tex >= 2048) {
+            atlas_w_ = atlas_h_ = 2048;
+            atlas_->reset_empty(atlas_w_, atlas_h_);
+        }
     }
 
     if (gw > 0 && gh > 0) {
         std::vector<uint8_t> mono(gw * gh);
-        stbtt_MakeGlyphBitmap(info, mono.data(), gw, gh, gw, scale_, scale_, gi);
+        stbtt_MakeGlyphBitmap(info, mono.data(), gw, gh, gw, scale, scale, gi);
         std::vector<uint8_t> rgba(gw * gh * 4);
         for (int i2 = 0; i2 < gw * gh; ++i2) {
             rgba[i2*4+0] = 255; rgba[i2*4+1] = 255; rgba[i2*4+2] = 255;
@@ -159,7 +216,7 @@ const Font::Glyph* Font::glyph(uint32_t cp) const {
     g.x0 = (float)pen_x_; g.y0 = (float)pen_y_;
     g.x1 = (float)(pen_x_ + gw); g.y1 = (float)(pen_y_ + gh);
     g.xoff = (float)x0; g.yoff = (float)y0;
-    g.xadv = adv * scale_;
+    g.xadv = adv * scale;
     g.w = gw; g.h = gh;
     if (gh > row_h_) row_h_ = gh;
     pen_x_ += gw + 1;
@@ -366,13 +423,13 @@ void Renderer::textured_quad4(float x0,float y0, float x1,float y1, float x2,flo
 }
 void Renderer::text(const Font& f, const std::string& s, float x, float y, Color c) {
     set_texture(f.atlas()->id());
-    float aw = (float)f.atlas_w_, ah = (float)f.atlas_h_;
     float pen_x = x, pen_y = y + f.ascent_;   // y is top of line
     size_t i = 0;
     while (i < s.size()) {
         uint32_t cp = utf8_next(s, i);
         const Font::Glyph* g = f.glyph(cp);   // may rasterize into the atlas now
         if (!g) continue;                     // unsupported (e.g. emoji) — skip
+        float aw = (float)f.atlas_w_, ah = (float)f.atlas_h_;   // the atlas may have grown
         float x0 = pen_x + g->xoff, y0 = pen_y + g->yoff;
         float x1 = x0 + g->w, y1 = y0 + g->h;
         float u0 = g->x0/aw, v0 = g->y0/ah, u1 = g->x1/aw, v1 = g->y1/ah;

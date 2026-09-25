@@ -29,8 +29,9 @@ cd "$GAMEDIR"
 export LD_LIBRARY_PATH="$GAMEDIR/libs.${DEVICE_ARCH}:$LD_LIBRARY_PATH"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 
-# Hardware decode: the v4l2m2m ffmpeg ships in libs.${DEVICE_ARCH} and the app
-# detects usable decoders itself (src/hwdetect.h) — nothing to do here. A
+# Hardware decode: currently DISABLED in the app (kHwdecEnabled in src/ui.cpp) —
+# every device decodes in software. When re-enabled, the v4l2m2m ffmpeg in
+# libs.${DEVICE_ARCH} is used where the app detects a decoder (src/hwdetect.h). A
 # dormant downloader flow (ytc_setup + data/hwdec_manifest.json) exists for
 # backends needing extra libs; see docs/HWDEC_SETUP_FLOW.md to re-enable it.
 

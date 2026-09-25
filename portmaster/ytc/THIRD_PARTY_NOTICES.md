@@ -45,6 +45,15 @@ provided these libraries remain replaceable and their notices are preserved.
   Free to use, embed, and redistribute; the font software may not be sold on its
   own. Full text: https://dejavu-fonts.github.io/License.html
 
+### Noto Sans CJK JP, subset (`fonts/NotoSansCJKjp-Subset.otf`)
+- Project: Noto CJK — https://github.com/notofonts/noto-cjk
+- License: SIL Open Font License, version 1.1 (OFL-1.1). Copyright 2014–2021
+  Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'.
+- Modified: subset to JIS X 0208 (kana + kanji), CJK/general punctuation, Latin-1
+  and full-width forms
+  (`tools/make_cjk_font.sh`); the font's own name table carries the license notice.
+- Full text: https://openfontlicense.org/open-font-license-official-text/
+
 ### SDL_GameControllerDB (`gamecontrollerdb.txt`)
 - Project: https://github.com/mdqinc/SDL_GameControllerDB
 - License: zlib/libpng license (same terms as SDL). Permissive.

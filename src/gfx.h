@@ -21,6 +21,9 @@ struct Color {
 
 struct Rect { float x, y, w, h; };
 
+// Decode one UTF-8 codepoint starting at s[i]; advances i. Bad bytes -> U+FFFD.
+uint32_t utf8_next(const std::string& s, size_t& i);
+
 // A GPU texture (RGBA). Owns the GL name.
 class Texture {
 public:
@@ -38,6 +41,8 @@ public:
     static std::unique_ptr<Texture> create_empty(int w, int h);
     // Upload a sub-rectangle (RGBA). GL thread only.
     void update(int x, int y, int w, int h, const uint8_t* rgba);
+    // Re-specify as a new empty (transparent) w x h image, keeping the GL name.
+    void reset_empty(int w, int h);
 
     unsigned id() const { return id_; }
     int width() const { return w_; }
@@ -49,11 +54,16 @@ private:
 
 // UTF-8 aware font with an ON-DEMAND glyph cache: any codepoint the .ttf covers is
 // rasterized into the atlas the first time it's drawn (Latin, accents, Cyrillic,
-// Greek, punctuation, ... with DejaVu). Missing glyphs: emoji-ish codepoints are
-// silently skipped (no more "????"), anything else renders as a tofu box.
+// Greek, punctuation, ... with DejaVu). An optional FALLBACK font (the CJK subset)
+// supplies codepoints the primary lacks, drawn at the same em size on the same
+// baseline. Missing from both: emoji-ish codepoints are silently skipped (no more
+// "????"), anything else renders as a tofu box.
 class Font {
 public:
-    static std::unique_ptr<Font> load(const std::string& ttf_path, float pixel_h);
+    // fallback_path: optional second font ("" or unreadable = none). Font file bytes
+    // are shared across every Font loaded from the same path (one copy in RAM).
+    static std::unique_ptr<Font> load(const std::string& ttf_path, float pixel_h,
+                                      const std::string& fallback_path = "");
     ~Font();
     float line_height() const { return line_h_; }
     float text_width(const std::string& s) const;
@@ -67,12 +77,13 @@ public:
     float pixel_h() const { return pixel_h_; }
 private:
     std::unique_ptr<Texture> atlas_;
-    std::vector<uint8_t> ttf_;                // font file bytes (fontinfo points here)
+    std::shared_ptr<const std::vector<uint8_t>> ttf_, fb_ttf_;  // file bytes (fontinfos point here)
     void* info_ = nullptr;                    // stbtt_fontinfo* (opaque; gfx.cpp only)
+    void* fb_info_ = nullptr;                 // fallback stbtt_fontinfo* or nullptr
     mutable std::unordered_map<uint32_t, Glyph> glyphs_;
     mutable int pen_x_ = 1, pen_y_ = 1, row_h_ = 0;   // shelf packer cursor
-    float line_h_ = 0, ascent_ = 0, pixel_h_ = 0, scale_ = 0;
-    int atlas_w_ = 0, atlas_h_ = 0;
+    float line_h_ = 0, ascent_ = 0, pixel_h_ = 0, scale_ = 0, fb_scale_ = 0;
+    mutable int atlas_w_ = 0, atlas_h_ = 0;   // grows 1024 -> 2048 under CJK load
     friend class Renderer;
 };
 

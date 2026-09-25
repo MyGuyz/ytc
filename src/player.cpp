@@ -22,9 +22,10 @@ struct Player::Impl {
     bool ended = false;
     std::string pending_audio;   // external audio URL to attach on file-loaded
     bool audio_added = false;
-    std::string hwdec = "auto-copy-safe";   // decode mode (settings/env); see init()
+    std::string hwdec = "no";    // decode mode (settings/env); see init()
     int aspect = 0;              // 0 Fit / 1 Zoom / 2 Stretch; see apply_aspect()
     int cc_size = 1, cc_style = 0;   // caption rendering; see apply_caption_style()
+    std::string fonts_dir;           // sub-fonts-dir (bundled CJK font); see init()
 
     static void* get_proc(void*, const char* name) {
         return SDL_GL_GetProcAddress(name);
@@ -54,9 +55,10 @@ struct Player::Impl {
         // corrupt/artifacted frames on some drivers (Intel VAAPI + render API).
         // Override with YTC_HWDEC (e.g. "no", "auto", "vaapi").
         // Env var wins (dev/debug escape hatch); otherwise the app-chosen mode
-        // (from the Settings "Video Decode" toggle), defaulting to auto-copy-safe.
+        // (from the Settings "Video Decode" toggle), defaulting to software ("no").
         const char* hw = getenv("YTC_HWDEC");
         mpv_set_option_string(mpv, "hwdec", hw ? hw : hwdec.c_str());
+        if (dbg) std::fprintf(stderr, "[mpv] hwdec=%s\n", hw ? hw : hwdec.c_str());
         mpv_set_option_string(mpv, "cache", "yes");
         // Allow app-local volume above 100% so quiet videos can be amplified
         // without touching the OS mixer (softvol).
@@ -65,6 +67,9 @@ struct Player::Impl {
         // Generous back-buffer: restricted (paced) googlevideo streams 403 re-reads
         // of far-behind ranges, so serve backward seeks from mpv's own cache.
         mpv_set_option_string(mpv, "demuxer-max-back-bytes", "48MiB");
+        // data/fonts/ as a caption font source: handheld CFWs often ship no CJK
+        // font (or no fontconfig at all), so Japanese captions would be boxes.
+        if (!fonts_dir.empty()) mpv_set_option_string(mpv, "sub-fonts-dir", fonts_dir.c_str());
         if (dbg) std::fprintf(stderr, "[mpv] initialize...\n");
         if (mpv_initialize(mpv) < 0) { mpv_destroy(mpv); mpv = nullptr; return false; }
         if (dbg) std::fprintf(stderr, "[mpv] initialize done; creating render ctx...\n");
@@ -271,12 +276,13 @@ int Player::volume() const {
     return (int)(impl_->prop_d("volume") + 0.5);
 }
 void Player::set_hwdec(const std::string& mode) {
-    impl_->hwdec = mode.empty() ? "auto-copy-safe" : mode;
+    impl_->hwdec = mode.empty() ? "no" : mode;
 }
 void Player::set_aspect(int mode) {
     impl_->aspect = (mode < 0 || mode > 2) ? 0 : mode;
     impl_->apply_aspect();   // live if playing; init() re-applies for later videos
 }
+void Player::set_fonts_dir(const std::string& dir) { impl_->fonts_dir = dir; }
 void Player::set_caption_style(int size, int style) {
     impl_->cc_size = (size < 0 || size > 2) ? 1 : size;
     impl_->cc_style = (style < 0 || style > 5) ? 0 : style;
@@ -288,8 +294,9 @@ void Player::set_speed(double mult) {
     if (mult > 4.0) mult = 4.0;
     mpv_set_property(impl_->mpv, "speed", MPV_FORMAT_DOUBLE, &mult);
 }
-void Player::add_subtitle(const std::string& path) {
+void Player::add_subtitle(const std::string& path, const std::string& font) {
     if (!impl_->mpv || path.empty()) return;
+    mpv_set_property_string(impl_->mpv, "sub-font", font.empty() ? "sans-serif" : font.c_str());
     // Async: sub-add opens and parses the file before returning, which stalls the
     // UI thread for a visible beat on weak cores. Fire it and let mpv apply it
     // when ready — the caller only needs the toggle to feel instant.
@@ -372,7 +379,8 @@ int Player::volume() const { return 100; }
 void Player::set_hwdec(const std::string&) {}
 void Player::set_aspect(int) {}
 void Player::set_speed(double) {}
-void Player::add_subtitle(const std::string&) {}
+void Player::add_subtitle(const std::string&, const std::string&) {}
+void Player::set_fonts_dir(const std::string&) {}
 void Player::subtitles_off() {}
 void Player::set_caption_style(int, int) {}
 bool Player::active() const { return false; }

@@ -8,6 +8,7 @@
     { "code": "it", "name": "Italiano", "hl": "it", "gl": "IT" },
     { "code": "ru", "name": "Русский", "hl": "ru", "gl": "RU" },
     { "code": "uk", "name": "Українська", "hl": "uk", "gl": "UA" },
-    { "code": "el", "name": "Ελληνικά", "hl": "el", "gl": "GR" }
+    { "code": "el", "name": "Ελληνικά", "hl": "el", "gl": "GR" },
+    { "code": "ja", "name": "日本語", "hl": "ja", "gl": "JP" }
   ]
 }

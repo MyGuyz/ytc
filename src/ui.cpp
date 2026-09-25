@@ -17,6 +17,70 @@ namespace ui {
 // Debug logging flag, read once (avoid getenv() on the per-frame render path).
 static const bool kDbg = getenv("YTC_DEBUG") != nullptr;
 
+// YouTube's direct media URLs do not contain the chapters shown on the watch page.
+// Creators define those as timestamped description lines, so retain the timestamp
+// list for shoulder-button chapter navigation. YouTube requires at least three
+// chapters beginning at 0:00; applying the same rule avoids treating incidental
+// timestamps in ordinary prose as chapters.
+static std::vector<double> chapter_times(const std::string& description) {
+    std::vector<double> out;
+    size_t line_at = 0;
+    while (line_at <= description.size()) {
+        size_t line_end = description.find('\n', line_at);
+        if (line_end == std::string::npos) line_end = description.size();
+        std::string line = description.substr(line_at, line_end - line_at);
+        size_t at = 0;
+        while (at < line.size()) {
+            while (at < line.size() && std::isspace((unsigned char)line[at])) ++at;
+            size_t end = at;
+            while (end < line.size() && !std::isspace((unsigned char)line[end])) ++end;
+            if (end == at) break;
+            std::string token = line.substr(at, end - at);
+            while (!token.empty() && (token.front() == '(' || token.front() == '['))
+                token.erase(token.begin());
+            while (!token.empty() && (token.back() == ')' || token.back() == ']' ||
+                                      token.back() == ',' || token.back() == '.'))
+                token.pop_back();
+
+            int parts[3] = {0, 0, 0}, count = 0;
+            size_t p = 0;
+            bool valid = !token.empty();
+            while (valid && p < token.size() && count < 3) {
+                size_t colon = token.find(':', p);
+                size_t stop = colon == std::string::npos ? token.size() : colon;
+                if (stop == p) { valid = false; break; }
+                int value = 0;
+                for (size_t i = p; i < stop; ++i) {
+                    if (!std::isdigit((unsigned char)token[i])) { valid = false; break; }
+                    value = value * 10 + (token[i] - '0');
+                }
+                if (!valid) break;
+                parts[count++] = value;
+                if (colon == std::string::npos) { p = token.size(); break; }
+                p = colon + 1;
+            }
+            if (valid && p == token.size() && (count == 2 || count == 3)) {
+                int minutes = parts[count - 2], seconds = parts[count - 1];
+                if (seconds < 60 && (count == 2 || minutes < 60)) {
+                    double t = count == 3 ? parts[0] * 3600.0 + minutes * 60.0 + seconds
+                                          : minutes * 60.0 + seconds;
+                    // A 0:00 line starts the candidate chapter block. Reset here so
+                    // an unrelated timestamp earlier in the description cannot hide
+                    // a valid chapter list farther down.
+                    if (t == 0) { out.clear(); out.push_back(t); }
+                    else if (!out.empty() && t > out.back()) out.push_back(t);
+                }
+                break; // at most one chapter timestamp per description line
+            }
+            at = end;
+        }
+        if (line_end == description.size()) break;
+        line_at = line_end + 1;
+    }
+    if (out.size() < 3 || out.front() != 0) out.clear();
+    return out;
+}
+
 // ---------- On-screen keyboard layout ----------
 namespace {
 enum KType { KCHAR, KSPACE, KDEL, KSUBMIT, KSHIFT, KLEFT, KRIGHT };
@@ -239,6 +303,21 @@ void RestrictedCheck::worker() {
 }
 
 // ---------- App ----------
+// Hardware video decode is DISABLED for release: every device decodes in
+// software (even where hardware decode is detected and works), no detection
+// runs, and Settings > Video hides the Video Decode row. Flip to re-enable the
+// whole path (detection, per-SoC defaults, the toggle). YTC_HWDEC still
+// overrides for development.
+static constexpr bool kHwdecEnabled = false;
+
+// The bundled CJK subset (data/fonts/NotoSansCJKjp-Subset.otf; see tools/make_cjk_font.sh),
+// or "" when absent. Shared by the UI fonts and mpv's caption renderer.
+static std::string cjk_font_path() {
+    const std::string name = "NotoSansCJKjp-Subset.otf";
+    for (const std::string& c : {platform::exe_dir() + "/data/fonts/" + name, "data/fonts/" + name})
+        if (std::ifstream(c).good()) return c;
+    return "";
+}
 void App::load_fonts() {
     // Portable font lookup: env override, then the port/app-local copy in
     // data/, then the Debian system path (dev machines). Handhelds don't
@@ -263,14 +342,18 @@ void App::load_fonts() {
     };
     const std::string ttf_path = pick_font();
     const char* ttf = ttf_path.c_str();
+    // Fallback for what DejaVu lacks: Japanese (kana, JIS X 0208 kanji, CJK
+    // punctuation, full-width forms). Titles/comments in Japanese show up in every
+    // UI language, not just ja. Missing file = no fallback (tofu, as before).
+    const std::string cjk = cjk_font_path();
     // Font scale is NOT pure-linear with height: a floor keeps text readable on
     // small handheld screens (held close), and a cap avoids oversized text on 4K.
     float s = win_->height() / 720.f;
     if (s < 0.9f) s = 0.9f;
     if (s > 2.2f) s = 2.2f;
-    font_title_ = gfx::Font::load(ttf, 34 * s);
-    font_body_  = gfx::Font::load(ttf, 22 * s);
-    font_small_ = gfx::Font::load(ttf, 18 * s);
+    font_title_ = gfx::Font::load(ttf, 34 * s, cjk);
+    font_body_  = gfx::Font::load(ttf, 22 * s, cjk);
+    font_small_ = gfx::Font::load(ttf, 18 * s, cjk);
     fonts_baked_h_ = win_->height();
 }
 
@@ -331,8 +414,8 @@ App::App(const std::string& config_path, gfx::Window* win)
     volume_ = it_.setting_int("volume", 100);              // app-local playback volume %
     if (volume_ < 0) volume_ = 0; if (volume_ > 150) volume_ = 150;
     // Hardware decode detection runs asynchronously (see start_hwdec_detect);
-    // the toggle appears once it lands. Default until then: auto-copy-safe.
-    start_hwdec_detect();
+    // the toggle appears once it lands. Skipped entirely while kHwdecEnabled is off.
+    if (kHwdecEnabled) start_hwdec_detect();
     // Video Decode default: Hardware — EXCEPT on SoCs where the v4l2m2m-copy
     // path is known to lose to software (Venus capture buffers are mapped
     // uncached; the per-frame memcpy is slower than decoding on the CPU cores).
@@ -340,7 +423,9 @@ App::App(const std::string& config_path, gfx::Window* win)
     // yet ~1400 presentation drops/min, and software played it better. The
     // toggle stays available; an explicit choice persists. Zero-copy (dmabuf
     // import) is the eventual fix that beats both — see docs/HWDEC_SURVEY.md.
-    {
+    if (!kHwdecEnabled) {
+        hwdec_mode_ = 1;   // Software, regardless of device support or a saved choice
+    } else {
         int saved = it_.setting_int("hwdec", -1);
         if (saved >= 0) hwdec_mode_ = saved ? 1 : 0;
         else {
@@ -363,6 +448,10 @@ App::App(const std::string& config_path, gfx::Window* win)
     cc_style_ = it_.setting_int("cc_style", 0);               // caption style (white)
     if (cc_style_ < 0 || cc_style_ > 5) cc_style_ = 0;
     player_.set_caption_style(cc_size_, cc_style_);
+    {   // Captions render in mpv (libass), not our atlas: give it the CJK font too.
+        std::string cjk = cjk_font_path();
+        if (!cjk.empty()) player_.set_fonts_dir(cjk.substr(0, cjk.rfind('/') + 1));
+    }
     sponsorblock_ = it_.setting_int("sponsorblock", 0) != 0;   // default OFF
     autoplay_ = it_.setting_int("autoplay", 0) != 0;          // default OFF
     // Home sources bitmask (1 fav / 2 history / 4 custom). Default: Favorites
@@ -1641,6 +1730,13 @@ void App::poll_captions() {
 // Apply the current caption selection WITHOUT blocking: Off hides; an already-cached
 // track is added instantly; an un-cached track is downloaded on a worker thread and
 // installed later by poll_caption_download().
+// Caption font for a track language: the bundled CJK font for Japanese (the
+// device may have no font with kana/kanji), else mpv's default.
+static std::string cc_font_for(const std::string& lang) {
+    if ((lang == "ja" || lang.rfind("ja-", 0) == 0) && !cjk_font_path().empty())
+        return "Noto Sans CJK JP";
+    return "";
+}
 // The cache key for the current CC selection ("" = Off/invalid) — a track's language code.
 std::string App::cc_current_key() const {
     if (cc_sel_ <= 0 || cc_sel_ > (int)cc_tracks_.size()) return "";
@@ -1652,7 +1748,7 @@ void App::apply_caption_selection() {
     std::string tlang = cc_tracks_[cc_sel_ - 1].tlang;
     std::string key = cc_current_key();
     auto it = cc_paths_.find(key);
-    if (it != cc_paths_.end()) { player_.add_subtitle(it->second); return; }  // cached
+    if (it != cc_paths_.end()) { player_.add_subtitle(it->second, cc_font_for(key)); return; }  // cached
     // Not cached: fetch off-thread. Hide until it arrives; show a brief status.
     // Queue the request instead of joining a busy worker — a join here would stall
     // the UI thread for a full network round-trip when cycling tracks quickly.
@@ -1725,7 +1821,7 @@ void App::poll_caption_download() {
         }
         if (kDbg) std::fprintf(stderr, "[cc] %s -> %zu bytes (%s)\n", lang.c_str(), vtt.size(),
                                still_selected ? "applied" : "cached");
-        if (still_selected) player_.add_subtitle(path);   // user may have moved on -> just cache
+        if (still_selected) player_.add_subtitle(path, cc_font_for(lang));   // user may have moved on -> just cache
     }
     maybe_start_cc_download();
 }
@@ -1783,53 +1879,78 @@ void App::poll_description() {
     desc_loading_ = false;
 }
 
-// Greedy word-wrap honoring \n; very long unbreakable words (URLs) hard-break at
-// UTF-8 boundaries so nothing overflows the panel.
+// Line-break rules for CJK text, which has no spaces: a break may fall between
+// any two characters when either is CJK, except before closing punctuation, small
+// kana and the prolonged-sound mark, or after an opening bracket (kinsoku shori).
+static bool is_cjk(uint32_t c) {
+    return (c >= 0x2E80 && c <= 0x9FFF) || (c >= 0xAC00 && c <= 0xD7AF) ||
+           (c >= 0xF900 && c <= 0xFAFF) || (c >= 0xFF00 && c <= 0xFFEF) ||
+           (c >= 0x20000 && c <= 0x3FFFF);
+}
+static bool cjk_no_break_before(uint32_t c) {
+    static const char32_t kClose[] =
+        U"、。，．・：；？！ー」』）］｝〕〉》】〙〗〟’”ゝゞヽヾ々〻"
+        U"ぁぃぅぇぉっゃゅょゎゕゖァィゥェォッャュョヮヵヶ)]},.!?:;";
+    for (char32_t k : kClose) if (k == c) return true;
+    return false;
+}
+static bool cjk_no_break_after(uint32_t c) {
+    static const char32_t kOpen[] = U"「『（［｛〔〈《【〘〖〝‘“([{";
+    for (char32_t k : kOpen) if (k == c) return true;
+    return false;
+}
+
+// Greedy word-wrap honoring \n. Latin text breaks at spaces; CJK between
+// characters (rules above). Very long unbreakable runs (URLs) hard-break at
+// character boundaries so nothing overflows the panel.
 static std::vector<std::string> wrap_text(const gfx::Font& f, const std::string& text,
                                           float max_w) {
     std::vector<std::string> lines;
+    struct Ch { size_t at; uint32_t cp; };
+    std::vector<Ch> ch;
+    std::vector<float> pre;   // pre[k] = width of ch[0..k)
     size_t pos = 0;
     while (pos <= text.size()) {
         size_t nl = text.find('\n', pos);
-        std::string para = text.substr(pos, nl == std::string::npos ? std::string::npos
-                                                                     : nl - pos);
-        std::string line;
-        size_t i = 0;
-        while (i < para.size()) {
-            size_t sp = para.find(' ', i);
-            std::string word = para.substr(i, sp == std::string::npos ? std::string::npos
-                                                                       : sp - i);
-            std::string cand = line.empty() ? word : line + " " + word;
-            if (f.text_width(cand) <= max_w) {
-                line = std::move(cand);
-            } else if (!line.empty()) {
-                lines.push_back(line);
-                line = word;
-            }
-            if (line.empty() ? false : f.text_width(line) > max_w) {
-                // Single word wider than the panel: hard-break at UTF-8 boundaries.
-                std::string chunk;
-                for (size_t b = 0; b < line.size(); ) {
-                    size_t adv = 1;
-                    uint8_t c = (uint8_t)line[b];
-                    if ((c >> 5) == 0x6) adv = 2;
-                    else if ((c >> 4) == 0xE) adv = 3;
-                    else if ((c >> 3) == 0x1E) adv = 4;
-                    std::string next = chunk + line.substr(b, adv);
-                    if (!chunk.empty() && f.text_width(next) > max_w) {
-                        lines.push_back(chunk);
-                        chunk.clear();
-                        next = line.substr(b, adv);
-                    }
-                    chunk = std::move(next);
-                    b += adv;
-                }
-                line = std::move(chunk);
-            }
-            if (sp == std::string::npos) break;
-            i = sp + 1;
+        size_t para_end = nl == std::string::npos ? text.size() : nl;
+        ch.clear(); pre.assign(1, 0.f);
+        for (size_t i = pos; i < para_end; ) {
+            size_t at = i;
+            uint32_t cp = gfx::utf8_next(text, i);
+            if (i > para_end) i = para_end;          // truncated sequence at the edge
+            const gfx::Font::Glyph* g = f.glyph(cp);
+            ch.push_back({at, cp});
+            pre.push_back(pre.back() + (g ? g->xadv : 0));
         }
-        lines.push_back(line);                    // may be "" (blank paragraph line)
+        auto byte_at = [&](size_t k) { return k < ch.size() ? ch[k].at : para_end; };
+        auto emit = [&](size_t a, size_t b) {     // ch[a..b), trailing spaces trimmed
+            while (b > a && ch[b - 1].cp == ' ') --b;
+            lines.push_back(text.substr(byte_at(a), byte_at(b) - byte_at(a)));
+        };
+        size_t line_start = 0, brk = 0;           // brk: last break opportunity (0 = none)
+        for (size_t i = 0; i < ch.size(); ++i) {
+            uint32_t cp = ch[i].cp;
+            if (i > line_start) {
+                uint32_t prev = ch[i - 1].cp;
+                if (cp != ' ' && (prev == ' ' ||
+                        ((is_cjk(prev) || is_cjk(cp)) &&
+                         !cjk_no_break_before(cp) && !cjk_no_break_after(prev))))
+                    brk = i;
+            }
+            if (cp == ' ' || pre[i + 1] - pre[line_start] <= max_w || i == line_start)
+                continue;
+            size_t cut = brk > line_start ? brk : i;   // no opportunity: hard break
+            emit(line_start, cut);
+            line_start = cut;
+            while (line_start < i && ch[line_start].cp == ' ') ++line_start;
+            brk = 0;
+            // The run carried over may itself be too long (URL): loop re-checks it.
+            if (pre[i + 1] - pre[line_start] > max_w && i > line_start) {
+                emit(line_start, i);
+                line_start = i;
+            }
+        }
+        emit(line_start, ch.size());              // may be "" (blank paragraph line)
         if (nl == std::string::npos) break;
         pos = nl + 1;
     }
@@ -3539,7 +3660,7 @@ void App::pump_async() {
         std::string cur = player_.hwdec_current();
         if (!cur.empty()) {
             hwdec_probed_this_video_ = true;
-            if (cur != "no" && !hwdec_capable_) {
+            if (kHwdecEnabled && cur != "no" && !hwdec_capable_) {
                 hwdec_capable_ = true;
                 it_.set_setting_str("hwdec_seen", cur);
                 if (getenv("YTC_DEBUG"))
@@ -3679,6 +3800,38 @@ void App::cycle_tab(int dir) {
         load_search_tab(t);
     } else return;
     tab_focus_ = false;   // shoulder-switch keeps focus on content, not the strip
+}
+
+void App::seek_chapter(int dir) {
+    if (mode_ != Mode::Playing || menu_open_ || desc_open_ ||
+        now_playing_chapters_.empty() || dir == 0) return;
+
+    // Include the pending scrub target so quick repeated shoulder presses can cross
+    // several chapters before the existing seek debounce fires.
+    double pos = player_.position() + (has_pending_seek_ ? pending_seek_ : 0.0);
+    int current = -1;
+    for (int i = 0; i < (int)now_playing_chapters_.size(); ++i) {
+        if (now_playing_chapters_[i] <= pos + 0.5) current = i;
+        else break;
+    }
+
+    int target = current;
+    if (dir > 0) {
+        target = current + 1;
+        if (target >= (int)now_playing_chapters_.size()) return;
+    } else {
+        // As in most media players, L restarts the current chapter when more than
+        // three seconds into it; another press goes to the previous chapter.
+        if (current < 0) return;
+        if (pos - now_playing_chapters_[current] <= 3.0) --target;
+        if (target < 0) target = 0;
+        if (std::abs(pos - now_playing_chapters_[target]) < 0.5) return;
+    }
+
+    pending_seek_ = now_playing_chapters_[target] - player_.position();
+    has_pending_seek_ = true;
+    pending_seek_at_ = SDL_GetTicks();
+    controls_until_ = pending_seek_at_ + 2600;
 }
 
 void App::render(gfx::Renderer& rn) {
@@ -5187,25 +5340,11 @@ void App::start_resolve(const std::string& video_id, const std::string& title, d
                 r.video_bitrate = vf->bitrate;
                 r.audio_lang = af ? af->track_lang : "";
                 r.audio_tracks = info.audio_tracks();   // for the player track picker
-                // Detect restricted (paced) delivery: some videos (e.g. kids content)
-                // 403 any range beyond a sliding window. The made-for-kids marker in
-                // playabilityStatus tells us for FREE; for unmarked videos a deep
-                // range probe is the fallback (skip small files — they fit anyway).
-                if (info.made_for_kids) {
-                    r.paced = true;
-                } else if (vf->content_length > (24LL << 20)) {
-                    try {
-                        HttpClient probe;
-                        char rng[64];
-                        long long off = vf->content_length * 9 / 10;
-                        std::snprintf(rng, sizeof rng, "Range: bytes=%lld-%lld", off, off + 1023);
-                        auto pr = probe.get(vf->url, {"User-Agent: " + info.user_agent,
-                                                      std::string(rng)});
-                        r.paced = (pr.status == 403);
-                    } catch (...) { r.paced = false; }
-                    if (dbg && r.paced)
-                        std::fprintf(stderr, "[play] RESTRICTED delivery detected (deep range 403)\n");
-                }
+                // The stable paced-delivery signal is YouTube's made-for-kids marker
+                // in playabilityStatus. Do not infer a channel-wide restriction from
+                // one deep-range 403: CDN errors and URL-specific range policies can
+                // produce the same response and were misclassifying normal videos.
+                r.paced = info.made_for_kids;
                 if (dbg) std::fprintf(stderr, "[play] resolved: video itag %d audio itag %d paced=%d\n",
                                       vf->itag, af ? af->itag : -1, (int)r.paced);
             }
@@ -5243,6 +5382,7 @@ void App::poll_resolve() {
     start_captions(now_playing_item_.video_id);        // fetch caption track list off-thread
     now_playing_title_ = r.title;
     now_playing_desc_ = r.description;          // free: came with the resolve
+    now_playing_chapters_ = chapter_times(r.description);
     playing_audio_tracks_ = std::move(r.audio_tracks);
     playing_audio_lang_ = r.audio_lang;
     hwdec_probed_this_video_ = false;           // re-learn hwdec-current per video
