@@ -467,6 +467,10 @@ private:
     // no shared CURL handle (every network call uses a local HttpClient).
     mutable std::mutex visitor_m_;
     std::string visitor_data_;
+    // Wall-clock fetch time (time(), NOT steady_clock: CLOCK_MONOTONIC stops during
+    // suspend, so a handheld slept overnight would never see the token age).
+    int64_t visitor_fetched_at_ = 0;
+    static constexpr int64_t kVisitorTtlSecs = 6 * 3600;
     // Locale for the Innertube client context (hl/gl). Guarded by its own mutex —
     // rarely written (settings change), read by every request builder.
     mutable std::mutex locale_m_;

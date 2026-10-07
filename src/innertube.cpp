@@ -125,7 +125,17 @@ std::vector<std::string> Innertube::client_headers(const ClientFingerprint& fp) 
 
 std::string Innertube::ensure_visitor_data() {
     std::lock_guard<std::mutex> lk(visitor_m_);
-    if (visitor_data_.empty()) refresh_visitor_data_locked();
+    if (visitor_data_.empty()) {
+        refresh_visitor_data_locked();
+    } else if ((int64_t)std::time(nullptr) - visitor_fetched_at_ > kVisitorTtlSecs) {
+        // Stale session token (e.g. app left open across a suspend): googlevideo can
+        // reject streams resolved with it, which looks like endless buffering.
+        // Refresh; if that fails (briefly offline after wake) keep the old one.
+        try { refresh_visitor_data_locked(); }
+        catch (const std::exception& e) {
+            std::fprintf(stderr, "[innertube] visitorData refresh failed, keeping old: %s\n", e.what());
+        }
+    }
     return visitor_data_;
 }
 std::string Innertube::visitor_token() const {
@@ -169,9 +179,12 @@ void Innertube::refresh_visitor_data_locked() {   // caller holds visitor_m_
     auto j = json::parse(r.body, nullptr, false);
     if (j.is_discarded())
         throw std::runtime_error("visitor_id: bad JSON");
-    visitor_data_ = j.at("responseContext").value("visitorData", "");
-    if (visitor_data_.empty())
+    // Only replace the token on success, so a failed refresh never wipes a working one.
+    std::string vd = j.at("responseContext").value("visitorData", "");
+    if (vd.empty())
         throw std::runtime_error("visitor_id: no visitorData in response");
+    visitor_data_ = std::move(vd);
+    visitor_fetched_at_ = (int64_t)std::time(nullptr);
 }
 
 // base64url-decode (no padding needed) — enough to peek inside a format's xtags,

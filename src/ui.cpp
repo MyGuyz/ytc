@@ -5269,6 +5269,15 @@ void App::replay_current(double at_seconds) {
     start_resolve(now_playing_item_.video_id, now_playing_item_.title, at_seconds);
 }
 
+// One-byte range GET against a resolved stream URL; returns the HTTP status
+// (-1 on a transport error). Cheap: runs on the resolve thread behind Loading.
+static long probe_stream_status(const std::string& url, const std::string& ua) {
+    HttpClient http;
+    std::vector<std::string> h = {"Range: bytes=0-0"};
+    if (!ua.empty()) h.push_back("User-Agent: " + ua);
+    return http.get(url, h, 10).status;
+}
+
 void App::start_resolve(const std::string& video_id, const std::string& title, double start_pos) {
     if (!Player::available()) {
         status_msg_ = i18n::tr(i18n::Str::NoMpv);
@@ -5307,6 +5316,21 @@ void App::start_resolve(const std::string& video_id, const std::string& title, d
         if (dbg) std::fprintf(stderr, "[play] resolving %s (cap=%d)...\n",
                               video_id.c_str(), prefs.max_height);
         yt::VideoInfo info = it_.resolve(video_id);   // background thread owns it_ here
+        // A 403 on byte 0 of the chosen stream means the URL itself was rejected
+        // (paced delivery only refuses ranges BEYOND the first window) — typically a
+        // stale visitorData session. Left alone, mpv would sit "buffering" for 90s.
+        // Refresh the token and resolve once more.
+        if (info.ok() && !info.is_live) {
+            if (const yt::Format* vf = info.best_video(prefs)) {
+                long code = probe_stream_status(vf->url, info.user_agent);
+                if (dbg) std::fprintf(stderr, "[play] stream probe -> HTTP %ld\n", code);
+                if (code == 403) {
+                    std::fprintf(stderr, "[play] stream rejected (403); refreshing session and re-resolving\n");
+                    it_.refresh_visitor_data();
+                    info = it_.resolve(video_id);
+                }
+            }
+        }
         r.title = info.title.empty() ? fallback_title : info.title;
         r.description = info.description;
         if (!info.ok()) {
