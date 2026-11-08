@@ -294,6 +294,10 @@ void Player::set_speed(double mult) {
     if (mult > 4.0) mult = 4.0;
     mpv_set_property(impl_->mpv, "speed", MPV_FORMAT_DOUBLE, &mult);
 }
+void Player::set_video_enabled(bool on) {
+    if (!impl_->mpv) return;
+    mpv_set_property_string(impl_->mpv, "vid", on ? "auto" : "no");
+}
 void Player::add_subtitle(const std::string& path, const std::string& font) {
     if (!impl_->mpv || path.empty()) return;
     mpv_set_property_string(impl_->mpv, "sub-font", font.empty() ? "sans-serif" : font.c_str());

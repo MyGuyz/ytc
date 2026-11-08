@@ -50,6 +50,8 @@ public:
 
     // Playback speed multiplier (mpv "speed"); 1.0 = normal. Applied live.
     void set_speed(double mult);
+    // Decode and show video (true) or play audio only (false), live.
+    void set_video_enabled(bool on);
 
     // How non-16:9 video fills the screen. 0 = Fit (letterbox/pillarbox bars),
     // 1 = Zoom (crop to fill, aspect kept), 2 = Stretch (fill, aspect ignored).

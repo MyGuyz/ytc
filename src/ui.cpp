@@ -4,6 +4,7 @@
 #include "remux.h"
 #include "hwdetect.h"
 #include <SDL.h>
+#include <unistd.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -385,9 +386,14 @@ void App::load_fonts() {
     std::string thai;
     for (const std::string& c : {platform::exe_dir() + "/data/fonts/BrickOSThai.ttf", std::string("data/fonts/BrickOSThai.ttf")})
         if (std::ifstream(c).good()) { thai = c; break; }
-    font_title_ = gfx::Font::load(ttf, 34 * s, cjk, thai);
-    font_body_  = gfx::Font::load(ttf, 22 * s, cjk, thai);
-    font_small_ = gfx::Font::load(ttf, 18 * s, cjk, thai);
+    font_title_ = gfx::Font::load(ttf, 40 * s, cjk, thai);
+    font_body_  = gfx::Font::load(ttf, 28 * s, cjk, thai);
+    font_small_ = gfx::Font::load(ttf, 23 * s, cjk, thai);
+    {   // rail symbols (house, heart, clock, arrow, gear) from the bundled DejaVu
+        std::string dv = platform::exe_dir() + "/data/DejaVuSans.ttf";
+        if (!std::ifstream(dv).good()) dv = "data/DejaVuSans.ttf";
+        font_icon_ = gfx::Font::load(dv, 30 * s);
+    }
     fonts_baked_h_ = win_->height();
 }
 
@@ -399,7 +405,7 @@ App::GridMetrics App::grid_metrics() const {
     m.gutter = 22 * m.s;
     m.cardw = (win_->width() - m.pad*2 - m.gutter*(cols_-1)) / cols_;
     m.thumbh = m.cardw * 9.f / 16.f;
-    m.meta_h = 100 * m.s;                 // title + author + "views · age"
+    m.meta_h = font_body_->line_height() + 2 * font_small_->line_height() + 18 * m.s;   // title + author + "views · age"
     m.cardh = m.thumbh + m.meta_h;
     m.rowstep = m.cardh + m.gutter;
     // Channel views carry a tab strip between the header and the grid; its height
@@ -517,6 +523,7 @@ App::App(const std::string& config_path, gfx::Window* win)
 }
 
 App::~App() {
+    if (media_flag_on_) unlink(getenv("YTC_MEDIA_FLAG"));
     cast_events_run_ = false;
     if (cast_events_thread_.joinable()) cast_events_thread_.join();
     if (resolve_thread_.joinable()) resolve_thread_.join();
@@ -1257,7 +1264,8 @@ void App::open_settings_browsing() {
     menu_kind_ = MenuKind::SettingsBrowsing;
     menu_items_.clear();
     const S vname[] = {S::ViewGrid, S::ViewCarousel, S::View3DCarousel, S::ViewCoverflow};
-    menu_items_.push_back({tr(S::SetView) + std::string(":  ") + tr(vname[(int)view_mode_]),
+    menu_items_.push_back({tr(S::SetView) + std::string(":  ") +
+                           (view_mode_ == ViewMode::Shelves ? std::string("TV") : std::string(tr(vname[(int)view_mode_]))),
                            MenuAction::CycleView});
     menu_items_.push_back({tr(S::SetHomeFeed), MenuAction::GoHomeFeedMenu});
     menu_items_.push_back({tr(S::SetCustomFeed), MenuAction::GoCustomFeed});
@@ -1549,7 +1557,7 @@ void App::adjust_setting(MenuAction a, int dir) {
         return;
     }
     if (a == MenuAction::CycleView) {
-        int nv = ((int)view_mode_ + (dir < 0 ? 3 : 1)) % 4;
+        int nv = ((int)view_mode_ + (dir < 0 ? 4 : 1)) % 5;
         view_mode_ = (ViewMode)nv;
         it_.set_setting_int("view", nv);
         carousel_pos_ = sel_;
@@ -3315,6 +3323,7 @@ const yt::SearchResult* App::selected() const {
     return &results_[sel_];
 }
 void App::input(Action a) {
+    if (screen_dark_) return;   // screen off (power tap): the buttons do nothing until it wakes
     // Resume prompt consumes input while open (a pre-playback modal).
     if (resume_prompt_open_) {
         switch (a) {
@@ -3614,6 +3623,7 @@ void App::input(Action a) {
     if (a == Action::Search) { open_search(); return; }
     if (a == Action::Sort && !query_.empty()) { toggle_search_sort(); return; }  // X: sort search
     if (a == Action::Menu) { open_menu(); return; }   // options for the highlighted item
+    if (a == Action::Back && rail_focus_) { rail_focus_ = false; return; }
     if (a == Action::Back) {
         // Stage 1: B jumps to the top of the list (first tile selected).
         if (!results_.empty() && sel_ != 0) {
@@ -3632,6 +3642,7 @@ void App::input(Action a) {
         if (!query_.empty() || !view_label_.empty()) load_home();
         return;
     }
+    if (view_mode_ == ViewMode::Shelves) { shelves_input(a); return; }
     // Tabs (channel views AND Home) are switched only with the L/R shoulders
     // (cycle_tab); the d-pad stays entirely in the grid.
     int n = (int)results_.size();
@@ -3679,6 +3690,20 @@ static std::string sb_category_label(const std::string& c) {
 }
 
 void App::pump_async() {
+    // Screen-off listening (Brick OS): flag "a video is playing" for the power button
+    // handler, and play audio only while it has the screen off.
+    if (const char* mf = getenv("YTC_MEDIA_FLAG")) {
+        bool on = mode_ == Mode::Playing && player_.active() && !player_.paused();
+        if (on != media_flag_on_) {
+            media_flag_on_ = on;
+            if (on) { if (FILE* f = std::fopen(mf, "w")) std::fclose(f); }
+            else unlink(mf);
+        }
+    }
+    if (const char* sf = getenv("YTC_SCREEN_OFF_FLAG")) {
+        bool dark = access(sf, F_OK) == 0;
+        if (dark != screen_dark_) { screen_dark_ = dark; player_.set_video_enabled(!dark); }
+    }
     thumbs_.pump();
     poll_resolve();
     poll_channel_info();
@@ -3807,7 +3832,7 @@ void App::pump_async() {
 }
 
 void App::toggle_view() {
-    view_mode_ = (ViewMode)(((int)view_mode_ + 1) % 4);   // Grid->Carousel->3D->Coverflow
+    view_mode_ = (ViewMode)(((int)view_mode_ + 1) % 5);   // Grid->Carousel->3D->Coverflow->TV
     it_.set_setting_int("view", (int)view_mode_);
     carousel_pos_ = sel_; carousel_vel_ = 0;
 }
@@ -3889,6 +3914,7 @@ void App::render(gfx::Renderer& rn) {
             case ViewMode::Carousel:   render_carousel(rn); break;
             case ViewMode::Carousel3D: render_carousel3d(rn); break;
             case ViewMode::Coverflow:  render_coverflow(rn); break;
+            case ViewMode::Shelves:    render_shelves(rn); break;
             default:                   render_grid(rn); break;
         }
         if (mode_ == Mode::Loading) render_loading(rn);
@@ -4237,10 +4263,10 @@ void App::draw_thumb(gfx::Renderer& rn, const yt::SearchResult& v,
                          : v.is_playlist() ? v.view_count_text
                                            : v.length_text;
         if (!pill.empty()) {
-            float pw = font_small_->text_width(pill) + 12*s;
-            gfx::Rect pr{r.x + r.w - pw - 8*s, r.y + r.h - 26*s, pw, 22*s};
-            rn.round_rect(pr, 6*s, gfx::Color{0,0,0,0.75f*alpha});
-            rn.text(*font_small_, pill, pr.x + 6*s, pr.y + 2*s, A(theme_.text));
+            float pw = font_small_->text_width(pill) + 14*s, ph = font_small_->line_height() + 2*s;
+            gfx::Rect pr{r.x + r.w - pw - 8*s, r.y + r.h - ph - 8*s, pw, ph};
+            rn.round_rect(pr, 7*s, gfx::Color{0,0,0,0.75f*alpha});
+            rn.text(*font_small_, pill, pr.x + 7*s, pr.y + 1*s, A(theme_.text));
         }
     }
 }
@@ -4278,6 +4304,7 @@ App::TileLines App::compose_lines(const yt::SearchResult& v, ChannelMetaCache& c
     return t;
 }
 void App::build_tile_lines() {
+    shelves_src_n_ = (size_t)-1;   // TV view rows follow results_
     tile_lines_.clear();
     tile_lines_.reserve(results_.size());
     for (const auto& v : results_) tile_lines_.push_back(compose_lines(v, chan_meta_));
@@ -4327,6 +4354,7 @@ static std::string tr_view_label(const std::string& label) {
     if (label == "Favorite Playlists") return i18n::tr(S::FavoritePlaylists);
     if (label == "Watch Later")        return i18n::tr(S::WatchLater);
     if (label == "History")           return i18n::tr(S::History);
+    if (label == "Downloads")         return i18n::tr(S::Downloads);
     return label;
 }
 void App::render_browse_chrome(gfx::Renderer& rn, float hy) {
@@ -4388,6 +4416,238 @@ void App::render_browse_chrome(gfx::Renderer& rn, float hy) {
             tx += chip_w + 10 * s;
         }
     }
+}
+
+// ---- TV view (ViewMode::Shelves) ------------------------------------------------
+static int shelf_kind(const yt::SearchResult& v) {
+    return v.is_channel() ? 2 : v.is_playlist() ? 3 : v.is_post() ? 4 : v.is_short ? 1 : 0;
+}
+static constexpr int kRailItems = 6;   // Search, Home, Favorites, Watch later, History, Settings
+
+void App::rebuild_shelves() {
+    using S = i18n::Str;
+    static const S kNames[5] = {S::TabVideos, S::TabShorts, S::FilterChannels, S::TabPlaylists, S::TabPosts};
+    static const size_t kRow = 12;
+    std::vector<int> groups[5];
+    for (int i = 0; i < (int)results_.size(); ++i) groups[shelf_kind(results_[i])].push_back(i);
+    shelves_.clear();
+    for (int k = 0; k < 5; ++k)
+        for (size_t at = 0; at < groups[k].size(); at += kRow) {
+            Shelf sh;
+            if (at == 0) sh.title = i18n::tr(kNames[k]);
+            sh.idx.assign(groups[k].begin() + at,
+                          groups[k].begin() + std::min(groups[k].size(), at + kRow));
+            shelves_.push_back(std::move(sh));
+        }
+    shelf_off_.resize(shelves_.size(), 0.f);
+    shelf_col_.resize(shelves_.size(), 0);
+    shelves_src_n_ = results_.size();
+}
+
+bool App::locate_shelf(int sel, int& row, int& col) const {
+    for (int r = 0; r < (int)shelves_.size(); ++r)
+        for (int c = 0; c < (int)shelves_[r].idx.size(); ++c)
+            if (shelves_[r].idx[c] == sel) { row = r; col = c; return true; }
+    return false;
+}
+
+int App::rail_page() const {
+    if (in_channel_view_) return 1;
+    if (view_label_ == "Favorite Channels") return 2;
+    if (view_label_ == "Watch Later") return 3;
+    if (view_label_ == "History") return 4;
+    return query_.empty() ? 1 : 0;
+}
+
+void App::rail_activate() {
+    rail_focus_ = false;
+    if (rail_sel_ == 0) { open_search(); return; }
+    if (rail_sel_ == 5) { rail_focus_ = true; open_main_menu(); open_settings(); return; }
+    in_channel_view_ = false;
+    if      (rail_sel_ == 1) load_home();
+    else if (rail_sel_ == 2) load_favorites();
+    else if (rail_sel_ == 3) load_watch_later();
+    else                     load_history();
+}
+
+void App::shelves_input(Action a) {
+    if (shelves_src_n_ != results_.size()) rebuild_shelves();
+    if (rail_focus_) {
+        switch (a) {
+            case Action::Up:     if (rail_sel_ > 0) rail_sel_--; break;
+            case Action::Down:   if (rail_sel_ < kRailItems - 1) rail_sel_++; break;
+            case Action::Right:  if (!shelves_.empty()) rail_focus_ = false; break;
+            case Action::Select: rail_activate(); break;
+            default: break;
+        }
+        return;
+    }
+    int r = 0, c = 0;
+    if (!locate_shelf(sel_, r, c)) {
+        if (a == Action::Left || shelves_.empty()) { rail_focus_ = true; rail_sel_ = rail_page(); }
+        else sel_ = shelves_[0].idx[0];
+        return;
+    }
+    switch (a) {
+        case Action::Left:
+            if (c > 0) c--;
+            else { rail_focus_ = true; rail_sel_ = rail_page(); return; }
+            break;
+        case Action::Right: if (c + 1 < (int)shelves_[r].idx.size()) c++; break;
+        case Action::Up:
+        case Action::Down: {
+            int nr = r + (a == Action::Up ? -1 : 1);
+            if (nr < 0 || nr >= (int)shelves_.size()) return;
+            shelf_col_[r] = c;   // each row remembers its tile, like a TV launcher
+            r = nr;
+            c = std::min(shelf_col_[r], (int)shelves_[r].idx.size() - 1);
+            break;
+        }
+        case Action::Select: {
+            const yt::SearchResult* v = selected();
+            if (v && v->is_channel()) open_channel(*v);
+            else if (v && v->is_playlist()) open_playlist(*v);
+            else if (v && v->is_post()) open_post(*v);
+            else request_playback();
+            return;
+        }
+        default: return;
+    }
+    shelf_col_[r] = c;
+    sel_ = shelves_[r].idx[c];
+}
+
+// Rail symbols: a drawn magnifier for Search, DejaVu glyphs for the rest.
+void App::draw_rail_icon(gfx::Renderer& rn, int item, float cx, float cy, float u, gfx::Color c) {
+    if (item == 0) {
+        float r = 10*u, ox = cx - 3*u, oy = cy - 3*u, t = 3*u;
+        rn.round_rect({ox - r, oy - r, 2*r, 2*r}, r, c);
+        rn.round_rect({ox - r + t, oy - r + t, 2*(r - t), 2*(r - t)}, r - t, theme_.bg);
+        float hx = ox + r*0.62f, hy = oy + r*0.62f, L = 8*u, w = 1.6f*u;
+        rn.quad4(hx - w, hy + w, hx + w, hy - w, hx + L + w, hy + L - w, hx + L - w, hy + L + w, c);
+        return;
+    }
+    static const char* kGlyph[] = {"", "\xE2\x8C\x82", "\xE2\x99\xA5", "\xE2\x97\xB7",
+                                   "\xE2\x86\xBA", "\xE2\x9A\x99"};   // house heart clock arrow gear
+    const gfx::Font& f = *font_icon_;
+    const char* g = kGlyph[item];
+    rn.text(f, g, cx - f.text_width(g) / 2, cy - f.line_height() / 2, c);
+}
+
+void App::render_shelves(gfx::Renderer& rn) {
+    using S = i18n::Str;
+    const int W = win_->width(), H = win_->height();
+    const float u = H / 768.f, s = H / 720.f;
+    rn.begin(W, H);
+    rn.clear(theme_.bg);
+    if (shelves_src_n_ != results_.size()) rebuild_shelves();
+
+    const float rail_w = 88*u, cx0 = rail_w + 12*u, top = 96*u;
+    const float cardw = 282*u, gap = 20*u, thumbh = cardw * 9.f / 16.f, rad = 14*u;
+    const float title_h = font_body_->line_height() + 14*u;
+    const float meta_h = font_body_->line_height() + 2*font_small_->line_height() + 14*u;
+    auto row_h = [&](const Shelf& sh) { return (sh.title.empty() ? 6*u : title_h) + thumbh + 12*u + meta_h + 14*u; };
+
+    int fr = 0, fc = 0;
+    bool have = locate_shelf(sel_, fr, fc);
+    float target = 0;
+    for (int r = 0; r < fr && have; ++r) target += row_h(shelves_[r]);
+    shelves_scroll_ += (target - shelves_scroll_) * 0.3f;
+    if (std::abs(target - shelves_scroll_) < 0.5f) shelves_scroll_ = target;
+
+    // Rows (drawn first; the top bar and the rail cover what scrolls under them).
+    if (results_.empty()) browse_empty_overlay(rn);
+    float y = top - shelves_scroll_;
+    for (int r = 0; r < (int)shelves_.size(); ++r) {
+        const Shelf& sh = shelves_[r];
+        float rh = row_h(sh);
+        if (y > H) break;
+        int n = (int)sh.idx.size();
+        int col = (have && r == fr) ? fc : std::min(shelf_col_[r], n - 1);
+        float content_w = n * (cardw + gap) - gap, view_w = W - cx0 - 20*u;
+        float tx = content_w <= view_w ? 0.f : std::min(col * (cardw + gap), content_w - view_w);
+        shelf_off_[r] += (tx - shelf_off_[r]) * 0.3f;
+        if (std::abs(tx - shelf_off_[r]) < 0.5f) shelf_off_[r] = tx;
+        if (y + rh < top - 40*u) { y += rh; continue; }
+        float ty = y + (sh.title.empty() ? 6*u : title_h);
+        if (!sh.title.empty()) rn.text(*font_body_, sh.title, cx0, y, theme_.text);
+        for (int c = 0; c < n; ++c) {
+            float x = cx0 + c * (cardw + gap) - shelf_off_[r];
+            int i = sh.idx[c];
+            const yt::SearchResult& v = results_[i];
+            if (x + cardw < -2*cardw || x > W + 2*cardw) continue;
+            if (!v.thumbnail_url.empty()) thumbs_.request(v.thumbnail_url);
+            else if (v.is_channel()) { std::string av = chan_meta_.avatar(v.channel_id);
+                                       if (!av.empty()) thumbs_.request(av); }
+            if (x + cardw < 0 || x > W) continue;
+            bool foc = have && !rail_focus_ && r == fr && c == fc;
+            gfx::Rect tr{x, ty, cardw, thumbh};
+            if (foc) rn.round_rect({x - 5*u, ty - 5*u, cardw + 10*u, thumbh + 10*u}, rad + 5*u, theme_.ring);
+            draw_thumb(rn, v, tr, s, 1.0f);
+            rn.round_corners(tr, rad, foc ? theme_.ring : theme_.bg);
+            draw_meta(rn, v, i, x, ty + thumbh + 12*u, cardw, s, foc ? 1.0f : 0.8f);
+        }
+        y += rh;
+    }
+
+    // Top bar: search pill, then the tab chips (Home, search, channel pages).
+    rn.quad({0, 0, (float)W, top - 10*u}, theme_.bg);
+    float ph = 54*u, py = 22*u, pw = 300*u;
+    rn.round_rect({cx0, py, pw, ph}, ph / 2, theme_.chip);
+    draw_rail_icon(rn, 0, cx0 + 30*u, py + ph / 2, u, theme_.text_dim);
+    std::string q = (!query_.empty() && !in_channel_view_) ? query_ : std::string(i18n::tr(S::Search));
+    rn.text(*font_small_, font_small_->ellipsize(q, pw - 74*u), cx0 + 54*u,
+            py + (ph - font_small_->line_height()) / 2, theme_.text_dim);
+    float chip_x = cx0 + pw + 18*u;
+    if (channel_tabs_active() || home_tabs_active() || search_tabs_active()) {
+        int active = channel_tabs_active() ? chan_tab_ : search_tabs_active() ? search_tab_ : home_tab_;
+        const S kTabs[]       = {S::TabAll, S::TabVideos, S::TabShorts, S::TabPosts, S::TabPlaylists};
+        const S kSearchTabs[] = {S::TabAll, S::TabVideos, S::TabShorts, S::FilterChannels, S::TabPlaylists};
+        const S* tabs = search_tabs_active() ? kSearchTabs : kTabs;
+        float ch = 44*u, cy = py + (ph - ch) / 2;
+        for (int i = 0; i < 5; ++i) {
+            const char* label = i18n::tr(tabs[i]);
+            float cw = font_small_->text_width(label) + 30*u;
+            if (chip_x + cw > W - 16*u) break;
+            bool st = i == active;
+            rn.round_rect({chip_x, cy, cw, ch}, ch / 2, st ? theme_.ring : theme_.chip);
+            rn.text(*font_small_, label, chip_x + 15*u, cy + (ch - font_small_->line_height()) / 2,
+                    st ? theme_.bg : theme_.text);
+            chip_x += cw + 8*u;
+        }
+    } else {
+        std::string page = in_channel_view_ ? query_ : tr_view_label(view_label_);
+        if (refresh_running_) page = i18n::tr(S::Loading);
+        rn.text(*font_body_, font_body_->ellipsize(page, W - chip_x - 24*u), chip_x,
+                py + (ph - font_body_->line_height()) / 2, theme_.text);
+    }
+
+    // Rail: icons; focused, it widens over the dimmed rows and shows labels.
+    static const S kLabels[kRailItems] = {S::Search, S::Home, S::FavoriteChannels, S::WatchLater,
+                                         S::History, S::Settings};
+    float rw = rail_w;
+    if (rail_focus_) {
+        rn.quad({0, 0, (float)W, (float)H}, theme_.bg.with_a(0.55f));
+        for (auto l : kLabels) rw = std::max(rw, 92*u + font_small_->text_width(i18n::tr(l)) + 28*u);
+    }
+    if (!rail_focus_) rn.quad({0, 0, cx0 - 4*u, (float)H}, theme_.bg);   // hide tiles scrolled off left
+    rn.quad({0, 0, rw, (float)H}, rail_focus_ ? theme_.panel : theme_.bg);
+    int page = rail_page();
+    float step = 72*u, iy0 = H / 2.f - step * (kRailItems - 1) / 2.f;
+    for (int k = 0; k < kRailItems; ++k) {
+        float cy = iy0 + k * step, cx = rail_w / 2;
+        bool hot = rail_focus_ && k == rail_sel_;
+        if (hot) rn.round_rect({10*u, cy - 28*u, rw - 20*u, 56*u}, 28*u, theme_.ring);
+        else if (k == page) rn.round_rect({cx - 28*u, cy - 28*u, 56*u, 56*u}, 28*u, theme_.chip);
+        gfx::Color ic = hot ? theme_.bg : (k == page ? theme_.text : theme_.text_dim);
+        draw_rail_icon(rn, k, cx, cy, u, ic);
+        if (rail_focus_)
+            rn.text(*font_small_, i18n::tr(kLabels[k]), 92*u, cy - font_small_->line_height() / 2,
+                    hot ? theme_.bg : theme_.text);
+    }
+
+    draw_status_banner(rn, top, s);
+    rn.end();
 }
 
 void App::render_grid(gfx::Renderer& rn) {

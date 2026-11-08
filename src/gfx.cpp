@@ -194,7 +194,10 @@ const Font::Glyph* Font::glyph(uint32_t cp) const {
     auto* info = static_cast<const stbtt_fontinfo*>(info_);
     float scale = scale_;
     int gi = 0;
-    if (thai_info_ && thai_cp(cp)) {   // Thai and its mark glyphs always from the Thai font
+    // Thai and its mark glyphs always from the Thai font; Latin and punctuation too, so a
+    // line reads in one typeface (Brick OS: IBM Plex Sans Thai). Symbols (arrows, keyboard
+    // keys) stay with the primary font, which has them.
+    if (thai_info_ && (thai_cp(cp) || (cp >= 0x20 && cp < 0x2070))) {
         auto* th = static_cast<const stbtt_fontinfo*>(thai_info_);
         if (int tg = stbtt_FindGlyphIndex(th, (int)cp)) { info = th; gi = tg; scale = thai_scale_; }
     }

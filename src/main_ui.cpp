@@ -1011,6 +1011,13 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "MAINMENUSHOT done\n");
             return 0;
         }
+        if (std::getenv("YTC_RAILSHOT")) {   // TV view: focus the rail (Brick OS)
+            for (int i = 0; i < 4; ++i) app.input(ui::App::Action::Left);
+            app.input(ui::App::Action::Down);
+            for (int k = 0; k < 12; ++k) { app.pump_async(); app.render(rn); win->swap(); SDL_Delay(30); }
+            app.render(rn);
+            win->screenshot(std::string(shot) + "_rail.png");
+        }
         if (std::getenv("YTC_SEARCHSHOT")) {
             app.input(ui::App::Action::Search);          // open the OSK
             app.render(rn);

@@ -134,7 +134,7 @@ public:
     void toggle_view();                 // cycle browse view (Grid -> Carousel -> 3D -> Coverflow)
     void cycle_tab(int dir);            // L/R shoulders: switch channel/Home tab
     void seek_chapter(int dir);          // L/R shoulders while playing: previous/next chapter
-    enum class ViewMode { Grid, Carousel, Carousel3D, Coverflow };
+    enum class ViewMode { Grid, Carousel, Carousel3D, Coverflow, Shelves };
     bool in_subview() const { return in_channel_view_; }   // channel/playlist view active?
     bool menu_open() const { return menu_open_; }
     bool wants_quit() const { return quit_requested_; }     // set by the menu's Exit item
@@ -155,6 +155,15 @@ private:
     struct GridMetrics { float s, hbar, pad, gutter, cardw, thumbh, meta_h, cardh, rowstep, top, fh, tabs_h; };
     GridMetrics grid_metrics() const;
     void render_grid(gfx::Renderer& rn);
+    // TV view (ViewMode::Shelves): icon rail + rows of tiles grouped by kind.
+    struct Shelf { std::string title; std::vector<int> idx; };   // idx: into results_
+    void rebuild_shelves();
+    bool locate_shelf(int sel, int& row, int& col) const;
+    int rail_page() const;              // rail item of the page on screen
+    void rail_activate();
+    void shelves_input(Action a);
+    void render_shelves(gfx::Renderer& rn);
+    void draw_rail_icon(gfx::Renderer& rn, int item, float cx, float cy, float u, gfx::Color c);
     void render_carousel(gfx::Renderer& rn);
     void render_carousel3d(gfx::Renderer& rn);   // spread 3D carousel
     void render_coverflow(gfx::Renderer& rn);    // traditional stacked coverflow
@@ -532,6 +541,14 @@ private:
     Theme theme_;
     gfx::Window* win_;
     std::unique_ptr<gfx::Font> font_title_, font_body_, font_small_;
+    std::unique_ptr<gfx::Font> font_icon_;   // DejaVu symbols for the TV view's rail
+    std::vector<Shelf> shelves_;
+    size_t shelves_src_n_ = (size_t)-1;      // results_.size() the shelves were built from
+    std::vector<float> shelf_off_;           // eased horizontal scroll per row
+    std::vector<int> shelf_col_;             // last focused tile per row
+    float shelves_scroll_ = 0;               // eased vertical scroll
+    bool rail_focus_ = false;
+    int rail_sel_ = 1;
     int fonts_baked_h_ = 0;   // window height the current font atlases were baked for
     yt::Innertube it_;
     yt::Cast cast_;
@@ -681,6 +698,8 @@ private:
     bool hwdec_capable_ = false;    // a manifest bundle's detect + check both pass
     std::string hwdec_hw_value_ = "auto-copy-safe";  // mpv "hwdec" for Hardware mode
                                                      // (from the matched bundle)
+    bool media_flag_on_ = false;    // YTC_MEDIA_FLAG file present (a video is playing)
+    bool screen_dark_ = false;      // YTC_SCREEN_OFF_FLAG file present (screen is off)
     bool hwdec_probed_this_video_ = false;  // learned hwdec-current for this video yet?
     // Startup detection runs on a worker (the desktop hw-device probe does a real
     // vaInitialize; must not sit on the first-frame path). poll_hwdec_detect()
