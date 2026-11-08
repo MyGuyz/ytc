@@ -3,6 +3,8 @@
 #include "i18n.h"
 #include "remux.h"
 #include "hwdetect.h"
+#include "http.h"
+#include "../third_party/json.hpp"
 #include <SDL.h>
 #include <unistd.h>
 #include <algorithm>
@@ -386,13 +388,13 @@ void App::load_fonts() {
     std::string thai;
     for (const std::string& c : {platform::exe_dir() + "/data/fonts/BrickOSThai.ttf", std::string("data/fonts/BrickOSThai.ttf")})
         if (std::ifstream(c).good()) { thai = c; break; }
-    font_title_ = gfx::Font::load(ttf, 40 * s, cjk, thai);
-    font_body_  = gfx::Font::load(ttf, 28 * s, cjk, thai);
-    font_small_ = gfx::Font::load(ttf, 23 * s, cjk, thai);
+    font_title_ = gfx::Font::load(ttf, 44 * s, cjk, thai);
+    font_body_  = gfx::Font::load(ttf, 32 * s, cjk, thai);
+    font_small_ = gfx::Font::load(ttf, 27 * s, cjk, thai);
     {   // rail symbols (house, heart, clock, arrow, gear) from the bundled DejaVu
         std::string dv = platform::exe_dir() + "/data/DejaVuSans.ttf";
         if (!std::ifstream(dv).good()) dv = "data/DejaVuSans.ttf";
-        font_icon_ = gfx::Font::load(dv, 30 * s);
+        font_icon_ = gfx::Font::load(dv, 36 * s);
     }
     fonts_baked_h_ = win_->height();
 }
@@ -545,6 +547,7 @@ App::~App() {
     if (cc_thread_.joinable()) cc_thread_.join();
     if (cc_dl_thread_.joinable()) cc_dl_thread_.join();
     if (rel_thread_.joinable()) rel_thread_.join();
+    if (sugg_thread_.joinable()) sugg_thread_.join();
 }
 
 void App::set_results(std::vector<yt::SearchResult> r) {
@@ -3601,11 +3604,32 @@ void App::input(Action a) {
             }
             return (int)kb[row].size() - 1;
         };
+        if (sugg_focus_ && sugg_.empty()) sugg_focus_ = false;
+        if (sugg_focus_) {
+            int n = (int)sugg_.size();
+            switch (a) {
+                case Action::Left:  if (sugg_col_ > 0) sugg_col_--; break;
+                case Action::Right: if (sugg_col_ < n - 1) sugg_col_++; break;
+                case Action::Down:  sugg_focus_ = false; break;
+                case Action::Select: query_input_ = sugg_[std::min(sugg_col_, n - 1)];
+                                     kb_caret_ = (int)query_input_.size();
+                                     submit_search(); break;
+                case Action::Search: submit_search(); break;
+                case Action::Sort:   query_input_.clear(); kb_caret_ = 0; break;
+                case Action::Back:   mode_ = Mode::Grid; kb_mode_ = KbMode::Search; break;
+                default: break;
+            }
+            return;
+        }
         switch (a) {
             case Action::Left:  kb_col_ = (kb_col_ > 0) ? kb_col_ - 1 : (int)kb[kb_row_].size()-1; break;
             case Action::Right: kb_col_ = (kb_col_ < (int)kb[kb_row_].size()-1) ? kb_col_ + 1 : 0; break;
             case Action::Up:    if (kb_row_ > 0) { float c = xcenter(kb_row_, kb_col_);
-                                                   kb_col_ = col_at(--kb_row_, c); } break;
+                                                   kb_col_ = col_at(--kb_row_, c); }
+                                else if (!kb_numeric() && !sugg_.empty()) {
+                                    sugg_focus_ = true;
+                                    if (sugg_col_ >= (int)sugg_.size()) sugg_col_ = 0;
+                                } break;
             case Action::Down:  if (kb_row_ < (int)kb.size()-1) { float c = xcenter(kb_row_, kb_col_);
                                                    kb_col_ = col_at(++kb_row_, c); } break;
             case Action::Select: kb_activate(); break;
@@ -3690,6 +3714,7 @@ static std::string sb_category_label(const std::string& c) {
 }
 
 void App::pump_async() {
+    pump_suggestions();
     // Screen-off listening (Brick OS): flag "a video is playing" for the power button
     // handler, and play audio only while it has the screen off.
     if (const char* mf = getenv("YTC_MEDIA_FLAG")) {
@@ -4542,8 +4567,8 @@ void App::render_shelves(gfx::Renderer& rn) {
     rn.clear(theme_.bg);
     if (shelves_src_n_ != results_.size()) rebuild_shelves();
 
-    const float rail_w = 88*u, cx0 = rail_w + 12*u, top = 96*u;
-    const float cardw = 282*u, gap = 20*u, thumbh = cardw * 9.f / 16.f, rad = 14*u;
+    const float rail_w = 96*u, cx0 = rail_w + 12*u, top = 100*u;
+    const float cardw = 330*u, gap = 20*u, thumbh = cardw * 9.f / 16.f, rad = 14*u;
     const float title_h = font_body_->line_height() + 14*u;
     const float meta_h = font_body_->line_height() + 2*font_small_->line_height() + 14*u;
     auto row_h = [&](const Shelf& sh) { return (sh.title.empty() ? 6*u : title_h) + thumbh + 12*u + meta_h + 14*u; };
@@ -5148,6 +5173,8 @@ void App::open_search() {
     kb_shift_ = false;
     kb_row_ = 1; kb_col_ = 0;   // start on 'q'
     status_msg_.clear();
+    sugg_.clear(); sugg_focus_ = false; sugg_col_ = 0;
+    sugg_seen_ = query_input_; sugg_asked_ = "\x01"; sugg_seen_ms_ = 0;
 }
 void App::input_text(const std::string& s) {
     for (char c : s) if (c >= 32 && c <= 126) {   // ASCII-only atlas
@@ -5246,91 +5273,212 @@ void App::render_loading(gfx::Renderer& rn) {
 }
 
 void App::render_search(gfx::Renderer& rn) {
+    // Brick OS: big-key search screen. Query field on top (the title is its
+    // placeholder), autocomplete chips under it, then the keyboard filling the rest.
     const int W = win_->width(), H = win_->height();
     float s = H / 720.f;
     rn.begin(W, H);
     rn.clear(theme_.bg);
+    const bool numeric = kb_numeric();
 
-    // Header.
-    float hbar = 84 * s;
-    rn.text(*font_title_, kb_title_, 32*s, 24*s, theme_.text);
-
-    // Query input box + blinking caret.
-    float bx = 32*s, by = hbar + 28*s, bw = W - 64*s, bh = 54*s;
-    rn.round_rect({bx, by, bw, bh}, 14*s, theme_.chip);
-    // Window the text so the caret (at kb_caret_) stays visible even when it overflows.
-    float avail = bw - 36*s;
+    const gfx::Font& qf = *font_title_;
+    float bx = 24*s, by = 16*s, bw = W - 48*s, bh = qf.line_height() + 20*s;
+    rn.round_rect({bx, by, bw, bh}, bh / 2, theme_.chip);
+    float tx0 = bx + 30*s, avail = bw - 60*s, ty = by + (bh - qf.line_height()) / 2;
     int csz = (int)query_input_.size();
     int caret = std::max(0, std::min(kb_caret_, csz));
-    int start = 0;   // pull start rightward until the pre-caret text fits
+    int start = 0;
     auto next_char = [&](int i) { i++; while (i < csz && ((unsigned char)query_input_[i] & 0xC0) == 0x80) i++; return i; };
-    while (start < caret &&
-           font_body_->text_width(query_input_.substr(start, caret - start)) > avail)
+    while (start < caret && qf.text_width(query_input_.substr(start, caret - start)) > avail)
         start = next_char(start);
-    std::string shown;   // extend from start while it fits, a whole character at a time
+    std::string shown;
     for (int i = start; i < csz;) {
         int j = next_char(i);
         std::string cand = shown + query_input_.substr(i, j - i);
-        if (font_body_->text_width(cand) > avail) break;
+        if (qf.text_width(cand) > avail) break;
         shown = std::move(cand);
         i = j;
     }
-    rn.text(*font_body_, shown, bx + 18*s, by + 14*s, theme_.text);
-    if (query_input_.empty() && !kb_placeholder_.empty())
-        rn.text(*font_body_, kb_placeholder_, bx + 18*s, by + 14*s, theme_.text_dim);
-    float caret_x = bx + 18*s + font_body_->text_width(query_input_.substr(start, caret - start));
+    rn.text(qf, shown, tx0, ty, theme_.text);
+    if (query_input_.empty()) {
+        const std::string& ph = kb_placeholder_.empty() ? kb_title_ : kb_placeholder_;
+        rn.text(qf, ph, tx0, ty, theme_.text_dim);
+    }
+    float caret_x = tx0 + qf.text_width(query_input_.substr(start, caret - start));
     if ((SDL_GetTicks() / 500) % 2 == 0)
-        rn.quad({caret_x + 1*s, by + 12*s, 2*s, bh - 24*s}, theme_.text);
+        rn.quad({caret_x + 1*s, by + 12*s, 3*s, bh - 24*s}, theme_.text);
 
-    // Keyboard grid — centered; selected key drawn white (ATV style). The numeric
-    // keypad (device linking) uses square keys on a narrow, centered grid.
-    const auto& kb = kb_numeric() ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
-    bool numeric = kb_numeric();
-    float gap = numeric ? 14*s : 10*s;
-    float keyh = numeric ? 92*s : 60*s;
-    int units = 0;   // the widest row (English rows total 10 units; Thai Kedmanee up to 13)
+    float gy = by + bh + 22*s;
+    if (!numeric) {   // autocomplete chips
+        const gfx::Font& f = *font_body_;
+        float ch = f.line_height() + 16*s, cgap = 12*s, pad = 22*s;
+        float sy = by + bh + 12*s;
+        if (sugg_.empty()) {
+            rn.text(*font_small_, query_input_.empty() ? "" : "\xE2\x80\xA6", bx + 12*s,
+                    sy + (ch - font_small_->line_height()) / 2, theme_.text_dim);
+        } else {
+            std::vector<float> xs; float x = 0;
+            for (const auto& q : sugg_) { xs.push_back(x); x += f.text_width(q) + 2*pad + cgap; }
+            float shift = 0;
+            if (sugg_focus_ && sugg_col_ < (int)sugg_.size()) {
+                float right = xs[sugg_col_] + f.text_width(sugg_[sugg_col_]) + 2*pad;
+                shift = std::max(0.f, right - (W - 48*s));
+            }
+            for (int k = 0; k < (int)sugg_.size(); ++k) {
+                float cx = bx + xs[k] - shift, cw = f.text_width(sugg_[k]) + 2*pad;
+                if (cx > W) break;
+                if (cx + cw < 0) continue;
+                bool sel = sugg_focus_ && k == sugg_col_;
+                rn.round_rect({cx, sy, cw, ch}, ch / 2, sel ? theme_.text : theme_.chip);
+                rn.text(f, sugg_[k], cx + pad, sy + (ch - f.line_height()) / 2, sel ? theme_.bg : theme_.text);
+            }
+        }
+        gy = sy + ch + 16*s;
+    }
+
+    float fh = font_small_->line_height() + 18*s;
+    const auto& kb = numeric ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
+    int nrows = (int)kb.size();
+    float gap = 10*s;
+    float keyh = (H - fh - 12*s - gy - (nrows - 1) * gap) / nrows;
+    keyh = std::min(keyh, numeric ? 110*s : 120*s);
+    int units = 0;
     for (const auto& row : kb) { int u = 0; for (const auto& k : row) u += k.span; units = std::max(units, u); }
-    float unit = numeric ? keyh                    // square digit keys
-                         : (W * 0.94f - (units - 1)*gap) / (float)units;
-    float gy = by + bh + (numeric ? 26*s : 28*s);
-    for (int r = 0; r < (int)kb.size(); ++r) {
-        float roww = -gap;   // true laid-out width (count each span's internal gaps too)
+    float unit = numeric ? keyh : (W * 0.97f - (units - 1) * gap) / (float)units;
+    for (int r = 0; r < nrows; ++r) {
+        float roww = -gap;
         for (const auto& k : kb[r]) roww += unit * k.span + gap * k.span;
         float x = (W - roww) / 2;
-        float ky = gy + r*(keyh+gap);
+        float ky = gy + r * (keyh + gap);
         for (int c = 0; c < (int)kb[r].size(); ++c) {
             const Key& k = kb[r][c];
             float kw = unit * k.span + gap * (k.span - 1);
-            bool sel = (r == kb_row_ && c == kb_col_);
+            bool sel = !sugg_focus_ && r == kb_row_ && c == kb_col_;
             gfx::Rect kr{x, ky, kw, keyh};
-            gfx::Color bg = sel ? theme_.text
-                          : (k.type == KSUBMIT) ? theme_.accent : theme_.chip;
-            rn.round_rect(kr, 10*s, bg);
-            if (k.type == KSPACE) {                       // draw a space bar, not text
+            gfx::Color bg = sel ? theme_.text : (k.type == KSUBMIT) ? theme_.accent : theme_.chip;
+            rn.round_rect(kr, 12*s, bg);
+            if (k.type == KSPACE) {
                 float bar = kw * 0.42f;
-                rn.quad({kr.x + (kw-bar)/2, kr.y + keyh - 16*s, bar, 3*s},
-                        sel ? theme_.bg : theme_.text_dim);
+                rn.quad({kr.x + (kw - bar) / 2, kr.y + keyh * 0.68f, bar, 4*s}, sel ? theme_.bg : theme_.text_dim);
             } else {
                 std::string lbl = (k.type == KSUBMIT) ? i18n::tr(i18n::Str::KbEnter) : k.label;
                 if (k.type == KLANG && kb_thai_) lbl = "A/\xE0\xB8\x81";
-                if (k.type == KCHAR && kb_shift_ && lbl.size()==1 && lbl[0]>='a' && lbl[0]<='z')
-                    lbl[0] = (char)(lbl[0]-'a'+'A');
-                const gfx::Font& f = *font_body_;
-                gfx::Color tc = sel ? theme_.bg
-                              : (k.type == KSHIFT && kb_shift_) ? theme_.accent : theme_.text;
-                rn.text(f, lbl, kr.x + (kw - f.text_width(lbl))/2,
-                        kr.y + (keyh - f.line_height())/2 + 4*s, tc);
+                if (k.type == KCHAR && kb_shift_ && lbl.size() == 1 && lbl[0] >= 'a' && lbl[0] <= 'z')
+                    lbl[0] = (char)(lbl[0] - 'a' + 'A');
+                const gfx::Font* f = font_title_.get();
+                if (f->text_width(lbl) > kw - 10*s) f = font_body_.get();
+                if (f->text_width(lbl) > kw - 8*s) f = font_small_.get();
+                gfx::Color tc = sel ? theme_.bg : (k.type == KSHIFT && kb_shift_) ? theme_.accent : theme_.text;
+                rn.text(*f, lbl, kr.x + (kw - f->text_width(lbl)) / 2,
+                        kr.y + (keyh - f->line_height()) / 2, tc);
             }
             x += kw + gap;
         }
     }
 
-    // Footer hints.
-    float fh = 44*s;
-    rn.quad({0, H-fh, (float)W, fh}, theme_.panel);
-    rn.text(*font_small_, i18n::tr(numeric ? i18n::Str::FooterCastCode : i18n::Str::FooterSearch),
-            32*s, H - fh + 12*s, theme_.text_dim);
+    rn.quad({0, H - fh, (float)W, fh}, theme_.panel);
+    std::string hint = i18n::tr(numeric ? i18n::Str::FooterCastCode : i18n::Str::FooterSearch);
+    hint = font_small_->ellipsize(hint, W - 40*s);
+    rn.text(*font_small_, hint, (W - font_small_->text_width(hint)) / 2,
+            H - fh + (fh - font_small_->line_height()) / 2, theme_.text_dim);
     rn.end();
+}
+
+void App::kb_clamp() {
+    const auto& kb = kb_numeric() ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
+    if (kb_row_ >= (int)kb.size()) kb_row_ = (int)kb.size() - 1;
+    if (kb_row_ < 0) kb_row_ = 0;
+    if (kb_col_ >= (int)kb[kb_row_].size()) kb_col_ = (int)kb[kb_row_].size() - 1;
+}
+
+bool App::kb_pad(int b) {
+    switch (b) {
+        case SDL_CONTROLLER_BUTTON_B:
+            if (query_input_.empty()) { mode_ = Mode::Grid; kb_mode_ = KbMode::Search; }
+            else backspace();
+            return true;
+        case SDL_CONTROLLER_BUTTON_Y:
+            query_input_.insert(query_input_.begin() + kb_caret_, ' '); kb_caret_++;
+            return true;
+        case SDL_CONTROLLER_BUTTON_X:
+            query_input_.clear(); kb_caret_ = 0;
+            return true;
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+            if (!kb_numeric()) { kb_thai_ = !kb_thai_; kb_shift_ = false; kb_clamp(); }
+            return true;
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+            if (!kb_numeric()) { kb_shift_ = !kb_shift_; kb_clamp(); }
+            return true;
+        case SDL_CONTROLLER_BUTTON_START:
+            submit_search();
+            return true;
+        case SDL_CONTROLLER_BUTTON_BACK:
+            mode_ = Mode::Grid; kb_mode_ = KbMode::Search;
+            return true;
+        default:
+            return false;
+    }
+}
+
+void App::kb_trigger(bool right, int v) {
+    int& st = right ? trig_r_ : trig_l_;
+    int now = v > 16000 ? 1 : (v < 8000 ? 0 : st);
+    if (now == st) return;
+    st = now;
+    if (!now) return;
+    if (!right) { while (kb_caret_ > 0 && ((unsigned char)query_input_[--kb_caret_] & 0xC0) == 0x80) {} }
+    else if (kb_caret_ < (int)query_input_.size()) {
+        kb_caret_++;
+        while (kb_caret_ < (int)query_input_.size() && ((unsigned char)query_input_[kb_caret_] & 0xC0) == 0x80) kb_caret_++;
+    }
+}
+
+// Autocomplete: 250 ms after the query stops changing, ask YouTube's suggest endpoint
+// (one request in flight; a stale answer is dropped).
+void App::pump_suggestions() {
+    if (sugg_done_) {
+        sugg_done_ = false;
+        std::lock_guard<std::mutex> lk(sugg_m_);
+        if (sugg_res_q_ == query_input_) {
+            sugg_ = sugg_res_;
+            if (sugg_col_ >= (int)sugg_.size()) sugg_col_ = 0;
+            if (sugg_.empty()) sugg_focus_ = false;
+        }
+    }
+    if (mode_ != Mode::Search || kb_mode_ != KbMode::Search) return;
+    unsigned now = SDL_GetTicks();
+    if (query_input_ != sugg_seen_) { sugg_seen_ = query_input_; sugg_seen_ms_ = now; }
+    if (sugg_seen_ == sugg_asked_ || sugg_running_ || now - sugg_seen_ms_ < 250) return;
+    std::string q = sugg_seen_;
+    sugg_asked_ = q;
+    while (!q.empty() && q.back() == ' ') q.pop_back();
+    if (q.empty()) { sugg_.clear(); sugg_focus_ = false; return; }
+    if (sugg_thread_.joinable()) sugg_thread_.join();
+    sugg_running_ = true;
+    std::string hl = i18n::language_hl(i18n::language());
+    std::string full = sugg_seen_;
+    sugg_thread_ = std::thread([this, q, hl, full]() {
+        std::vector<std::string> out;
+        try {
+            std::string enc;
+            static const char* hex = "0123456789ABCDEF";
+            for (unsigned char c : q) {
+                if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') enc += (char)c;
+                else { enc += '%'; enc += hex[c >> 4]; enc += hex[c & 15]; }
+            }
+            HttpClient http;
+            auto r = http.get("https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&oe=utf-8&hl="
+                              + hl + "&q=" + enc, {"User-Agent: Mozilla/5.0"}, 6);
+            if (r.ok()) {
+                auto j = nlohmann::json::parse(r.body, nullptr, false);
+                if (j.is_array() && j.size() > 1 && j[1].is_array())
+                    for (auto& e : j[1]) if (e.is_string() && out.size() < 10) out.push_back(e.get<std::string>());
+            }
+        } catch (...) {}
+        { std::lock_guard<std::mutex> lk(sugg_m_); sugg_res_q_ = full; sugg_res_ = std::move(out); }
+        sugg_running_ = false;
+        sugg_done_ = true;
+    });
 }
 
 void App::request_playback() {

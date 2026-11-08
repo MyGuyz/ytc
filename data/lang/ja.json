@@ -80,7 +80,6 @@
   "LoadingCaptions": "字幕を読み込み中...",
   "FooterBrowse": "十字キー: 移動    A: 再生/開く    Select: オプション    Start: メニュー    Y: 検索    B: 戻る",
   "FooterSubview": "左/右: 閲覧    A: 開く    L/R: タブ切替    V: 表示    B: 戻る",
-  "FooterSearch": "十字キー: 移動    A: 入力    X: クリア    Y: 検索    B: キャンセル",
   "FooterHomeMin": "Y: 検索    Start: メニュー",
   "FooterResume": "上/下: 選択    A: 決定    B: キャンセル",
   "FooterDesc": "左/右: 変更    B: 戻る",

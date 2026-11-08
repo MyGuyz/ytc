@@ -127,6 +127,11 @@ public:
     // Text entry (from a physical keyboard, in Search mode).
     void input_text(const std::string& utf8);
     void backspace();
+    // Brick OS: gamepad typing on the on-screen keyboard (B delete, Y space, X clear,
+    // L Thai/English, R shift, Start search, Select close). False = not handled here.
+    bool kb_pad(int sdl_button);
+    void kb_trigger(bool right, int value);   // L2/R2 move the caret
+    bool screen_dark() const { return screen_dark_; }
 
     void render(gfx::Renderer& rn);     // one frame
     void pump_async();                  // per-loop async work (thumbs + mpv events)
@@ -784,6 +789,21 @@ private:
     int  kb_caret_ = 0;        // insertion index into query_input_ (ASCII, byte==char)
     bool kb_shift_ = false;    // one-shot uppercase for the next letter
     bool kb_thai_ = false;     // Brick OS: Thai Kedmanee layout instead of QWERTY
+    // Brick OS: YouTube autocomplete shown as chips above the keyboard (Up from the
+    // top row focuses them, A searches one). Fetched off-thread, debounced.
+    std::vector<std::string> sugg_;
+    bool sugg_focus_ = false;
+    int  sugg_col_ = 0;
+    std::string sugg_seen_, sugg_asked_;
+    unsigned sugg_seen_ms_ = 0;
+    std::thread sugg_thread_;
+    std::atomic<bool> sugg_running_{false}, sugg_done_{false};
+    std::mutex sugg_m_;
+    std::string sugg_res_q_;
+    std::vector<std::string> sugg_res_;
+    int trig_l_ = 0, trig_r_ = 0;
+    void pump_suggestions();
+    void kb_clamp();
 
     // Async resolve (Select -> background thread -> play on the GL thread).
     std::thread resolve_thread_;

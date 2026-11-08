@@ -80,7 +80,7 @@
   "LoadingCaptions": "กำลังโหลดคำบรรยาย...",
   "FooterBrowse": "D-Pad: เลื่อน    A: เล่น/เปิด    Select: ตัวเลือก    Start: เมนู    Y: ค้นหา    B: กลับ",
   "FooterSubview": "ซ้าย/ขวา: เลื่อนดู    A: เปิด    L/R: สลับแท็บ    V: มุมมอง    B: กลับ",
-  "FooterSearch": "D-Pad: เลื่อน    A: พิมพ์    X: ล้าง    Y: ค้นหา    B: ยกเลิก",
+  "FooterSearch": "A พิมพ์   B ลบ   Y เว้นวรรค   X ล้าง   L ไทย/EN   R Shift   L2/R2 เลื่อน   START ค้นหา",
   "FooterHomeMin": "Y: ค้นหา    Start: เมนู",
   "FooterResume": "ขึ้น/ลง: เลือก    A: ยืนยัน    B: ยกเลิก",
   "FooterDesc": "ซ้าย/ขวา: เปลี่ยน    B: กลับ",

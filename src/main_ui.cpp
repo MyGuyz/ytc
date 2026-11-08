@@ -1022,10 +1022,18 @@ int main(int argc, char** argv) {
             app.input(ui::App::Action::Search);          // open the OSK
             app.render(rn);
             win->screenshot(std::string(shot) + "_kb_empty.png");
-            app.input_text("blender");                   // simulate typing
+            app.kb_pad(SDL_CONTROLLER_BUTTON_X); app.input_text("blender");
             for (int i = 0; i < 3; ++i) app.input(ui::App::Action::Down);  // move cursor
             app.render(rn);
             win->screenshot(std::string(shot) + "_kb_typed.png");
+            for (int w = 0; w < 3000; w += 50) { app.pump_async(); SDL_Delay(50); }
+            app.render(rn); win->screenshot(std::string(shot) + "_kb_sugg.png");
+            for (int i = 0; i < 6; ++i) app.input(ui::App::Action::Up);
+            app.input(ui::App::Action::Right);
+            app.render(rn); win->screenshot(std::string(shot) + "_kb_suggfocus.png");
+            app.input(ui::App::Action::Down);
+            app.kb_pad(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+            app.render(rn); win->screenshot(std::string(shot) + "_kb_thai.png");
             std::fprintf(stderr, "wrote OSK screenshots\n");
         }
         return 0;
@@ -1202,6 +1210,7 @@ int main(int argc, char** argv) {
                 if (std::getenv("YTC_DEBUG"))
                     std::fprintf(stderr, "gamepad button: %s\n",
                         SDL_GameControllerGetStringForButton((SDL_GameControllerButton)b));
+                if (app.mode() == M::Search && !app.menu_open() && app.kb_pad(b)) continue;
                 if (b == SDL_CONTROLLER_BUTTON_Y) app.input(A::Search); // open/submit
                 else if (b == SDL_CONTROLLER_BUTTON_X) app.input(A::Sort);      // X = sort (comments)
                 else if (b == SDL_CONTROLLER_BUTTON_BACK) app.input(A::Menu);   // Select btn = options
@@ -1228,6 +1237,11 @@ int main(int argc, char** argv) {
                     st = &stick_x; lo = SDL_CONTROLLER_BUTTON_DPAD_LEFT; hi = SDL_CONTROLLER_BUTTON_DPAD_RIGHT;
                 } else if (e.caxis.axis == SDL_CONTROLLER_AXIS_LEFTY) {
                     st = &stick_y; lo = SDL_CONTROLLER_BUTTON_DPAD_UP;   hi = SDL_CONTROLLER_BUTTON_DPAD_DOWN;
+                } else if (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT ||
+                           e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {
+                    if (app.mode() == M::Search && !app.menu_open())
+                        app.kb_trigger(e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT, e.caxis.value);
+                    continue;
                 } else continue;
                 int v = e.caxis.value, prev = *st;
                 int cur = prev;
@@ -1273,6 +1287,7 @@ int main(int argc, char** argv) {
             }
         }
         app.pump_async();
+        if (app.screen_dark()) { SDL_Delay(100); continue; }   // screen off: audio only, draw nothing
         app.render(rn);
         win->swap();
         SDL_Delay(16);
