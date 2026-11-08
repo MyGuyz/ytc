@@ -80,7 +80,6 @@
   "LoadingCaptions": "กำลังโหลดคำบรรยาย...",
   "FooterBrowse": "D-Pad: เลื่อน    A: เล่น/เปิด    Select: ตัวเลือก    Start: เมนู    Y: ค้นหา    B: กลับ",
   "FooterSubview": "ซ้าย/ขวา: เลื่อนดู    A: เปิด    L/R: สลับแท็บ    V: มุมมอง    B: กลับ",
-  "FooterSearch": "A พิมพ์   B ลบ   Y เว้นวรรค   X ล้าง   L ไทย/EN   R Shift   L2/R2 เลื่อน   START ค้นหา",
   "FooterHomeMin": "Y: ค้นหา    Start: เมนู",
   "FooterResume": "ขึ้น/ลง: เลือก    A: ยืนยัน    B: ยกเลิก",
   "FooterDesc": "ซ้าย/ขวา: เปลี่ยน    B: กลับ",
@@ -217,5 +216,13 @@
   "DateYear": "ปีนี้",
   "FilterRelevance": "ความเกี่ยวข้อง",
   "FilterPopularity": "ความนิยม",
-  "FooterSearchEmpty": "Select: ตัวกรอง    Y: ค้นหา    Start: เมนู    B: กลับ"
+  "FooterSearchEmpty": "Select: ตัวกรอง    Y: ค้นหา    Start: เมนู    B: กลับ",
+  "SearchYouTube": "ค้นหาใน YouTube",
+  "KbSpace": "เว้นวรรค",
+  "KbDelete": "ลบ",
+  "HintPlay": "เล่น",
+  "HintFollow": "ติดตามช่อง",
+  "HintTypeSearch": "พิมพ์ค้นหา",
+  "HintTabs": "สลับแท็บ",
+  "FooterSearch": "A พิมพ์   B ลบ   X เว้นวรรค   Y ก/A   L1 Shift   START ค้นหา"
 }

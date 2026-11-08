@@ -1022,7 +1022,7 @@ int main(int argc, char** argv) {
             app.input(ui::App::Action::Search);          // open the OSK
             app.render(rn);
             win->screenshot(std::string(shot) + "_kb_empty.png");
-            app.kb_pad(SDL_CONTROLLER_BUTTON_X); app.input_text("blender");
+            app.input(ui::App::Action::Sort); app.input_text("blender");
             for (int i = 0; i < 3; ++i) app.input(ui::App::Action::Down);  // move cursor
             app.render(rn);
             win->screenshot(std::string(shot) + "_kb_typed.png");
@@ -1032,7 +1032,7 @@ int main(int argc, char** argv) {
             app.input(ui::App::Action::Right);
             app.render(rn); win->screenshot(std::string(shot) + "_kb_suggfocus.png");
             app.input(ui::App::Action::Down);
-            app.kb_pad(SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+            app.kb_pad(SDL_CONTROLLER_BUTTON_Y);
             app.render(rn); win->screenshot(std::string(shot) + "_kb_thai.png");
             std::fprintf(stderr, "wrote OSK screenshots\n");
         }

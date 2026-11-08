@@ -803,6 +803,16 @@ private:
     std::vector<std::string> sugg_res_;
     int trig_l_ = 0, trig_r_ = 0;
     void pump_suggestions();
+    // Brick OS DESIGN.md: its fonts (Inter + the Thai font at em px, 768-high screen) and pieces
+    enum DZ { DZ_STATUS, DZ_PCT, DZ_ROW, DZ_CARD, DZ_META, DZ_CHIP, DZ_CHIP_SEL, DZ_PILL, DZ_HINT, DZ_HINTKEY,
+              DZ_LABEL, DZ_QUERY, DZ_KEY, DZ_KBTN, DZ_KHINT, DZ_KCHIP, DZ_BADGE, DZ_N };
+    std::unique_ptr<gfx::Font> dz_[DZ_N];
+    std::unique_ptr<gfx::Texture> rail_tex_[6];
+    void load_design_fonts();
+    const gfx::Font& dz(int i) const { return dz_[i] ? *dz_[i] : *font_body_; }
+    void design_status_bar(gfx::Renderer& rn);
+    void follow_selected();   // X in the TV view: follow / unfollow the tile's channel
+    void design_hint_bar(gfx::Renderer& rn, const std::vector<std::pair<std::string, std::string>>& hints);
     void kb_clamp();
 
     // Async resolve (Select -> background thread -> play on the GL thread).

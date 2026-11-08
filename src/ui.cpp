@@ -84,6 +84,15 @@ static std::vector<double> chapter_times(const std::string& description) {
     return out;
 }
 
+// DESIGN.md colours (section 2)
+namespace dzc {
+const gfx::Color bg{0, 0, 0, 1}, s1{0x1C/255.f, 0x1C/255.f, 0x1E/255.f, 1}, s2{0x2C/255.f, 0x2C/255.f, 0x2E/255.f, 1},
+    s3{0x3A/255.f, 0x3A/255.f, 0x3C/255.f, 1}, kb{0x12/255.f, 0x12/255.f, 0x14/255.f, 1},
+    text{0xF2/255.f, 0xF2/255.f, 0xF7/255.f, 1}, text2{0xA1/255.f, 0xA1/255.f, 0xA6/255.f, 1},
+    text3{0xC7/255.f, 0xC7/255.f, 0xCC/255.f, 1}, accent{0x0A/255.f, 0x84/255.f, 0xFF/255.f, 1},
+    white{1, 1, 1, 1}, red{0xFF/255.f, 0x45/255.f, 0x3A/255.f, 1};
+}
+
 // ---------- On-screen keyboard layout ----------
 namespace {
 enum KType { KCHAR, KSPACE, KDEL, KSUBMIT, KSHIFT, KLEFT, KRIGHT, KLANG };
@@ -109,27 +118,29 @@ const std::vector<std::vector<Key>> KB = {
 // Brick OS: Thai on the standard Kedmanee layout (TIS 820-2538), as on Thai PC and phone
 // keyboards. A lone mark is shown on a dotted circle (label) and types the mark (text).
 #define TK(t) {t, KCHAR, 0, 1, t}
-#define TM(t) {"\xE2\x97\x8C" t, KCHAR, 0, 1, t}
+#define TM(t) {t, KCHAR, 0, 1, t}
+// Brick OS: every Thai row is 12 keys wide (the mockup's rows; ฃ/ฅ end the third), so the keys line up in columns
+// edge to edge like the English rows; a mark key shows the mark alone.
 const std::vector<std::vector<Key>> KB_TH = {
     {TK("ๅ"),TK("/"),TK("-"),TK("ภ"),TK("ถ"),TM("ุ"),TM("ึ"),TK("ค"),TK("ต"),TK("จ"),TK("ข"),TK("ช")},
-    {TK("ๆ"),TK("ไ"),TK("ำ"),TK("พ"),TK("ะ"),TM("ั"),TM("ี"),TK("ร"),TK("น"),TK("ย"),TK("บ"),TK("ล"),TK("ฃ")},
-    {TK("ฟ"),TK("ห"),TK("ก"),TK("ด"),TK("เ"),TM("้"),TM("่"),TK("า"),TK("ส"),TK("ว"),TK("ง")},
+    {TK("ๆ"),TK("ไ"),TK("ำ"),TK("พ"),TK("ะ"),TM("ั"),TM("ี"),TK("ร"),TK("น"),TK("ย"),TK("บ"),TK("ล")},
+    {TK("ฟ"),TK("ห"),TK("ก"),TK("ด"),TK("เ"),TM("้"),TM("่"),TK("า"),TK("ส"),TK("ว"),TK("ง"),TK("ฃ")},
     {{"\xE2\x87\xA7",KSHIFT,0,1},
      TK("ผ"),TK("ป"),TK("แ"),TK("อ"),TM("ิ"),TM("ื"),TK("ท"),TK("ม"),TK("ใ"),TK("ฝ"),
      {"\xE2\x8C\xAB",KDEL,0,1}},
     {{"\xE2\x97\x80",KLEFT,0,1},{"\xE2\x96\xB6",KRIGHT,0,1},
-     {"space",KSPACE,' ',4},{"-",KCHAR,'-',1},{"\xE0\xB8\x81/A",KLANG,0,1},
+     {"space",KSPACE,' ',6},{"-",KCHAR,'-',1},{"\xE0\xB8\x81/A",KLANG,0,1},
      {"Search",KSUBMIT,0,2}},
 };
 const std::vector<std::vector<Key>> KB_TH_SHIFT = {
     {TK("+"),TK("๑"),TK("๒"),TK("๓"),TK("๔"),TM("ู"),TK("฿"),TK("๕"),TK("๖"),TK("๗"),TK("๘"),TK("๙")},
-    {TK("๐"),TK("\""),TK("ฎ"),TK("ฑ"),TK("ธ"),TM("ํ"),TM("๊"),TK("ณ"),TK("ฯ"),TK("ญ"),TK("ฐ"),TK(","),TK("ฅ")},
-    {TK("ฤ"),TK("ฆ"),TK("ฏ"),TK("โ"),TK("ฌ"),TM("็"),TM("๋"),TK("ษ"),TK("ศ"),TK("ซ"),TK(".")},
+    {TK("๐"),TK("\""),TK("ฎ"),TK("ฑ"),TK("ธ"),TM("ํ"),TM("๊"),TK("ณ"),TK("ฯ"),TK("ญ"),TK("ฐ"),TK(",")},
+    {TK("ฤ"),TK("ฆ"),TK("ฏ"),TK("โ"),TK("ฌ"),TM("็"),TM("๋"),TK("ษ"),TK("ศ"),TK("ซ"),TK("."),TK("ฅ")},
     {{"\xE2\x87\xA7",KSHIFT,0,1},
      TK("("),TK(")"),TK("ฉ"),TK("ฮ"),TM("ฺ"),TM("์"),TK("?"),TK("ฒ"),TK("ฬ"),TK("ฦ"),
      {"\xE2\x8C\xAB",KDEL,0,1}},
     {{"\xE2\x97\x80",KLEFT,0,1},{"\xE2\x96\xB6",KRIGHT,0,1},
-     {"space",KSPACE,' ',4},{"-",KCHAR,'-',1},{"\xE0\xB8\x81/A",KLANG,0,1},
+     {"space",KSPACE,' ',6},{"-",KCHAR,'-',1},{"\xE0\xB8\x81/A",KLANG,0,1},
      {"Search",KSUBMIT,0,2}},
 };
 #undef TK
@@ -397,6 +408,7 @@ void App::load_fonts() {
         font_icon_ = gfx::Font::load(dv, 36 * s);
     }
     fonts_baked_h_ = win_->height();
+    load_design_fonts();
 }
 
 App::GridMetrics App::grid_metrics() const {
@@ -3645,6 +3657,7 @@ void App::input(Action a) {
     // Grid / carousel browse. Any user input here cancels a pending autoplay countdown.
     cancel_autoplay();
     if (a == Action::Search) { open_search(); return; }
+    if (a == Action::Sort && view_mode_ == ViewMode::Shelves) { follow_selected(); return; }   // X: ติดตามช่อง
     if (a == Action::Sort && !query_.empty()) { toggle_search_sort(); return; }  // X: sort search
     if (a == Action::Menu) { open_menu(); return; }   // options for the highlighted item
     if (a == Action::Back && rail_focus_) { rail_focus_ = false; return; }
@@ -4559,19 +4572,48 @@ void App::draw_rail_icon(gfx::Renderer& rn, int item, float cx, float cy, float 
     rn.text(f, g, cx - f.text_width(g) / 2, cy - f.line_height() / 2, c);
 }
 
+void App::follow_selected() {
+    const yt::SearchResult* v = selected();
+    if (!v || v->channel_id.empty()) return;
+    std::string name = v->is_channel() ? v->title : v->author;
+    if (fav_ids_.count(v->channel_id)) {
+        it_.remove_favorite(v->channel_id);
+        status_msg_ = i18n::tr(i18n::Str::RemovedFav) + std::string(": ") + name;
+    } else {
+        it_.add_favorite(v->channel_id, name);
+        status_msg_ = i18n::tr(i18n::Str::AddedFav) + std::string(": ") + name;
+    }
+    status_until_ = SDL_GetTicks() + 4000;
+    refresh_favorites();
+}
+
+static int length_seconds(const std::string& s) {   // "1:02:03" / "8:24" -> seconds, 0 if none
+    int total = 0, part = 0; bool any = false;
+    for (char c : s) {
+        if (c >= '0' && c <= '9') { part = part * 10 + (c - '0'); any = true; }
+        else if (c == ':') { total = total * 60 + part; part = 0; }
+        else if (c != ' ') return 0;
+    }
+    return any ? total * 60 + part : 0;
+}
+
 void App::render_shelves(gfx::Renderer& rn) {
+    // DESIGN.md 6.4: status bar, the icon rail, search pill + tab chips, rows of cards, the hint bar
     using S = i18n::Str;
     const int W = win_->width(), H = win_->height();
-    const float u = H / 768.f, s = H / 720.f;
+    const float u = H / 768.f;
     rn.begin(W, H);
-    rn.clear(theme_.bg);
+    rn.clear(dzc::bg);
     if (shelves_src_n_ != results_.size()) rebuild_shelves();
 
-    const float rail_w = 96*u, cx0 = rail_w + 12*u, top = 100*u;
-    const float cardw = 330*u, gap = 20*u, thumbh = cardw * 9.f / 16.f, rad = 14*u;
-    const float title_h = font_body_->line_height() + 14*u;
-    const float meta_h = font_body_->line_height() + 2*font_small_->line_height() + 14*u;
-    auto row_h = [&](const Shelf& sh) { return (sh.title.empty() ? 6*u : title_h) + thumbh + 12*u + meta_h + 14*u; };
+    const float bar = 56*u, rail_w = 96*u, cx0 = rail_w + 16*u, top_y = bar + 12*u, pill_h = 48*u;
+    const float rows_top = top_y + pill_h, hint_top = H - 64*u;
+    const float cardw = 300*u, gap = 20*u, thumbh = 169*u, rad = 18*u;
+    const gfx::Font &rf = dz(DZ_ROW), &cf = dz(DZ_CARD), &mf = dz(DZ_META);
+    const float head = 22*u + rf.line_height() + 12*u;
+    auto row_h = [&](const Shelf& sh) {
+        return (sh.title.empty() ? 12*u : head) + thumbh + 8*u + cf.line_height() + 8*u + mf.line_height();
+    };
 
     int fr = 0, fc = 0;
     bool have = locate_shelf(sel_, fr, fc);
@@ -4580,22 +4622,21 @@ void App::render_shelves(gfx::Renderer& rn) {
     shelves_scroll_ += (target - shelves_scroll_) * 0.3f;
     if (std::abs(target - shelves_scroll_) < 0.5f) shelves_scroll_ = target;
 
-    // Rows (drawn first; the top bar and the rail cover what scrolls under them).
     if (results_.empty()) browse_empty_overlay(rn);
-    float y = top - shelves_scroll_;
+    float y = rows_top - shelves_scroll_;
     for (int r = 0; r < (int)shelves_.size(); ++r) {
         const Shelf& sh = shelves_[r];
         float rh = row_h(sh);
-        if (y > H) break;
+        if (y > hint_top) break;
         int n = (int)sh.idx.size();
         int col = (have && r == fr) ? fc : std::min(shelf_col_[r], n - 1);
-        float content_w = n * (cardw + gap) - gap, view_w = W - cx0 - 20*u;
+        float content_w = n * (cardw + gap) - gap, view_w = W - cx0 - 32*u;
         float tx = content_w <= view_w ? 0.f : std::min(col * (cardw + gap), content_w - view_w);
         shelf_off_[r] += (tx - shelf_off_[r]) * 0.3f;
         if (std::abs(tx - shelf_off_[r]) < 0.5f) shelf_off_[r] = tx;
-        if (y + rh < top - 40*u) { y += rh; continue; }
-        float ty = y + (sh.title.empty() ? 6*u : title_h);
-        if (!sh.title.empty()) rn.text(*font_body_, sh.title, cx0, y, theme_.text);
+        if (y + rh < rows_top - 40*u) { y += rh; continue; }
+        float ty = y + (sh.title.empty() ? 12*u : head);
+        if (!sh.title.empty()) rn.text(rf, sh.title, cx0, y + 22*u, dzc::text);
         for (int c = 0; c < n; ++c) {
             float x = cx0 + c * (cardw + gap) - shelf_off_[r];
             int i = sh.idx[c];
@@ -4607,71 +4648,113 @@ void App::render_shelves(gfx::Renderer& rn) {
             if (x + cardw < 0 || x > W) continue;
             bool foc = have && !rail_focus_ && r == fr && c == fc;
             gfx::Rect tr{x, ty, cardw, thumbh};
-            if (foc) rn.round_rect({x - 5*u, ty - 5*u, cardw + 10*u, thumbh + 10*u}, rad + 5*u, theme_.ring);
-            draw_thumb(rn, v, tr, s, 1.0f);
-            rn.round_corners(tr, rad, foc ? theme_.ring : theme_.bg);
-            draw_meta(rn, v, i, x, ty + thumbh + 12*u, cardw, s, foc ? 1.0f : 0.8f);
+            if (foc) {   // 5px accent ring at offset 4
+                rn.round_rect({x - 9*u, ty - 9*u, cardw + 18*u, thumbh + 18*u}, rad + 9*u, dzc::accent);
+                rn.round_rect({x - 4*u, ty - 4*u, cardw + 8*u, thumbh + 8*u}, rad + 4*u, dzc::bg);
+            }
+            rn.quad(tr, dzc::s1);
+            gfx::Color tint{1, 1, 1, 1};
+            std::string url = v.thumbnail_url;
+            if (url.empty() && v.is_channel()) url = chan_meta_.avatar(v.channel_id);
+            if (auto* tex = url.empty() ? nullptr : thumbs_.get(url)) {
+                if (v.is_channel()) { float av = thumbh * 0.82f;
+                    rn.textured_cover({x + (cardw - av) / 2, ty + (thumbh - av) / 2, av, av}, *tex, tint); }
+                else rn.textured_cover(tr, *tex, tint);
+            } else if (v.is_post()) {
+                rn.text(mf, mf.ellipsize(v.title.substr(0, v.title.find('\n')), cardw - 24*u), x + 12*u, ty + 12*u, dzc::text2);
+            }
+            // watched bar: 5 high, #FF453A, along the bottom by the saved position
+            int len = length_seconds(v.length_text);
+            if (len > 0 && !v.video_id.empty()) {
+                double pos = it_.resume_pos(v.video_id);
+                if (pos > 0) rn.quad({x, ty + thumbh - 5*u, (float)(cardw * std::min(1.0, pos / len)), 5*u}, dzc::red);
+            }
+            std::string pill = v.is_short ? std::string() : v.is_playlist() ? v.view_count_text : v.length_text;
+            if (!pill.empty()) {   // duration: 15/600, black, radius 8, padding 3 8, 10 from the right, 12 from the bottom
+                const gfx::Font& pf = dz(DZ_PILL);
+                float pw = pf.text_width(pill) + 16*u, ph = pf.line_height() + 6*u;
+                gfx::Rect pr{x + cardw - 10*u - pw, ty + thumbh - 12*u - ph, pw, ph};
+                rn.round_rect(pr, 8*u, dzc::bg);
+                rn.text(pf, pill, pr.x + 8*u, pr.y + 3*u, dzc::text);
+            }
+            rn.round_corners(tr, rad, dzc::bg);
+            std::string title = v.is_post() ? v.title.substr(0, v.title.find('\n')) : v.title;
+            rn.text(cf, cf.ellipsize(title, cardw), x, ty + thumbh + 8*u, dzc::text);
+            std::string meta;
+            auto add = [&](const std::string& p) { if (!p.empty()) meta += (meta.empty() ? "" : " \xC2\xB7 ") + p; };
+            if (v.is_channel()) add(v.subs_text);
+            else { add(v.author); add(v.view_count_text); add(v.published_text); }
+            rn.text(mf, mf.ellipsize(meta, cardw), x, ty + thumbh + 8*u + cf.line_height() + 8*u, dzc::text2);
         }
         y += rh;
     }
 
-    // Top bar: search pill, then the tab chips (Home, search, channel pages).
-    rn.quad({0, 0, (float)W, top - 10*u}, theme_.bg);
-    float ph = 54*u, py = 22*u, pw = 300*u;
-    rn.round_rect({cx0, py, pw, ph}, ph / 2, theme_.chip);
-    draw_rail_icon(rn, 0, cx0 + 30*u, py + ph / 2, u, theme_.text_dim);
+    // top bar over what scrolls under it: search pill 260x48, the tab chips, the quality badge
+    rn.quad({0, 0, (float)W, rows_top}, dzc::bg);
+    design_status_bar(rn);
+    rn.round_rect({cx0, top_y, 260*u, pill_h}, 24*u, dzc::s1);
+    if (rail_tex_[0]) rn.textured({cx0 + 18*u, top_y + (pill_h - 22*u) / 2, 22*u, 22*u}, *rail_tex_[0], dzc::text2);
     std::string q = (!query_.empty() && !in_channel_view_) ? query_ : std::string(i18n::tr(S::Search));
-    rn.text(*font_small_, font_small_->ellipsize(q, pw - 74*u), cx0 + 54*u,
-            py + (ph - font_small_->line_height()) / 2, theme_.text_dim);
-    float chip_x = cx0 + pw + 18*u;
+    rn.text(dz(DZ_HINT), dz(DZ_HINT).ellipsize(q, 260*u - 70*u), cx0 + 52*u,
+            top_y + (pill_h - dz(DZ_HINT).line_height()) / 2, dzc::text2);
+    float chip_x = cx0 + 260*u + 12*u, right = W - 32*u;
+    {   // quality badge: 16, #A1A1A6, 1px #3A3A3C, radius 10, padding 5 10
+        int mh = effective_max_height();
+        std::string qb = mh > 0 ? std::to_string(mh) + "p" : std::string("Auto");
+        const gfx::Font& bf = dz(DZ_BADGE);
+        float bw = bf.text_width(qb) + 20*u, bh = bf.line_height() + 10*u;
+        gfx::Rect br{right - bw, top_y + (pill_h - bh) / 2, bw, bh};
+        rn.round_rect(br, 10*u, dzc::s3);
+        rn.round_rect({br.x + u, br.y + u, br.w - 2*u, br.h - 2*u}, 9*u, dzc::bg);
+        rn.text(bf, qb, br.x + 10*u, br.y + 5*u, dzc::text2);
+        right = br.x - 12*u;
+    }
     if (channel_tabs_active() || home_tabs_active() || search_tabs_active()) {
         int active = channel_tabs_active() ? chan_tab_ : search_tabs_active() ? search_tab_ : home_tab_;
         const S kTabs[]       = {S::TabAll, S::TabVideos, S::TabShorts, S::TabPosts, S::TabPlaylists};
         const S kSearchTabs[] = {S::TabAll, S::TabVideos, S::TabShorts, S::FilterChannels, S::TabPlaylists};
         const S* tabs = search_tabs_active() ? kSearchTabs : kTabs;
-        float ch = 44*u, cy = py + (ph - ch) / 2;
+        float ch = 44*u, cy = top_y + (pill_h - ch) / 2;
         for (int i = 0; i < 5; ++i) {
-            const char* label = i18n::tr(tabs[i]);
-            float cw = font_small_->text_width(label) + 30*u;
-            if (chip_x + cw > W - 16*u) break;
             bool st = i == active;
-            rn.round_rect({chip_x, cy, cw, ch}, ch / 2, st ? theme_.ring : theme_.chip);
-            rn.text(*font_small_, label, chip_x + 15*u, cy + (ch - font_small_->line_height()) / 2,
-                    st ? theme_.bg : theme_.text);
-            chip_x += cw + 8*u;
+            const gfx::Font& f = dz(st ? DZ_CHIP_SEL : DZ_CHIP);
+            const char* label = i18n::tr(tabs[i]);
+            float cw = f.text_width(label) + 40*u;
+            if (chip_x + cw > right) break;
+            rn.round_rect({chip_x, cy, cw, ch}, 22*u, st ? dzc::text : dzc::s1);
+            rn.text(f, label, chip_x + 20*u, cy + (ch - f.line_height()) / 2, st ? dzc::bg : dzc::text3);
+            chip_x += cw + 12*u;
         }
     } else {
         std::string page = in_channel_view_ ? query_ : tr_view_label(view_label_);
         if (refresh_running_) page = i18n::tr(S::Loading);
-        rn.text(*font_body_, font_body_->ellipsize(page, W - chip_x - 24*u), chip_x,
-                py + (ph - font_body_->line_height()) / 2, theme_.text);
+        rn.text(rf, rf.ellipsize(page, right - chip_x), chip_x, top_y + (pill_h - rf.line_height()) / 2, dzc::text);
     }
 
-    // Rail: icons; focused, it widens over the dimmed rows and shows labels.
-    static const S kLabels[kRailItems] = {S::Search, S::Home, S::FavoriteChannels, S::WatchLater,
-                                         S::History, S::Settings};
+    // the rail: 56x56 circles, 30px icons, from 92 under the status bar, gap 14; the current page on #2C2C2E.
+    // Focused (not in the mockup) it widens over the dimmed rows with the labels, as before.
+    static const S kLabels[kRailItems] = {S::Search, S::Home, S::FavoriteChannels, S::WatchLater, S::History, S::Settings};
     float rw = rail_w;
     if (rail_focus_) {
-        rn.quad({0, 0, (float)W, (float)H}, theme_.bg.with_a(0.55f));
-        for (auto l : kLabels) rw = std::max(rw, 92*u + font_small_->text_width(i18n::tr(l)) + 28*u);
-    }
-    if (!rail_focus_) rn.quad({0, 0, cx0 - 4*u, (float)H}, theme_.bg);   // hide tiles scrolled off left
-    rn.quad({0, 0, rw, (float)H}, rail_focus_ ? theme_.panel : theme_.bg);
+        rn.quad({0, bar, (float)W, hint_top - bar}, dzc::bg.with_a(0.6f));
+        for (auto l : kLabels) rw = std::max(rw, 92*u + dz(DZ_HINT).text_width(i18n::tr(l)) + 28*u);
+        rn.quad({0, bar, rw, hint_top - bar}, dzc::s1);
+    } else rn.quad({0, bar, cx0 - 4*u, hint_top - bar}, dzc::bg);   // tiles scrolled off to the left
     int page = rail_page();
-    float step = 72*u, iy0 = H / 2.f - step * (kRailItems - 1) / 2.f;
     for (int k = 0; k < kRailItems; ++k) {
-        float cy = iy0 + k * step, cx = rail_w / 2;
+        float cy = bar + 92*u + 28*u + k * 70*u, cx = rail_w / 2;
         bool hot = rail_focus_ && k == rail_sel_;
-        if (hot) rn.round_rect({10*u, cy - 28*u, rw - 20*u, 56*u}, 28*u, theme_.ring);
-        else if (k == page) rn.round_rect({cx - 28*u, cy - 28*u, 56*u, 56*u}, 28*u, theme_.chip);
-        gfx::Color ic = hot ? theme_.bg : (k == page ? theme_.text : theme_.text_dim);
-        draw_rail_icon(rn, k, cx, cy, u, ic);
+        if (hot) rn.round_rect({10*u, cy - 28*u, rw - 20*u, 56*u}, 28*u, dzc::accent);
+        else if (k == page) rn.round_rect({cx - 28*u, cy - 28*u, 56*u, 56*u}, 28*u, dzc::s2);
+        gfx::Color ic = hot ? dzc::white : (k == page ? dzc::text : dzc::text2);
+        if (rail_tex_[k]) rn.textured({cx - 15*u, cy - 15*u, 30*u, 30*u}, *rail_tex_[k], ic);
         if (rail_focus_)
-            rn.text(*font_small_, i18n::tr(kLabels[k]), 92*u, cy - font_small_->line_height() / 2,
-                    hot ? theme_.bg : theme_.text);
+            rn.text(dz(DZ_HINT), i18n::tr(kLabels[k]), 92*u, cy - dz(DZ_HINT).line_height() / 2, hot ? dzc::white : dzc::text);
     }
 
-    draw_status_banner(rn, top, s);
+    design_hint_bar(rn, {{"A", i18n::tr(S::HintPlay)}, {"X", i18n::tr(S::HintFollow)},
+                         {"Y", i18n::tr(S::HintTypeSearch)}, {"L1 R1", i18n::tr(S::HintTabs)}});
+    draw_status_banner(rn, rows_top, H / 720.f);
     rn.end();
 }
 
@@ -5166,8 +5249,8 @@ void App::render_player(gfx::Renderer& rn) {
 void App::open_search() {
     mode_ = Mode::Search;
     kb_mode_ = KbMode::Search;
-    kb_title_ = i18n::tr(i18n::Str::Search);
-    kb_placeholder_ = i18n::tr(i18n::Str::TypeToSearch);
+    kb_title_ = i18n::tr(i18n::Str::SearchYouTube);
+    kb_placeholder_.clear();
     query_input_ = query_;      // seed with the current query for quick edits
     kb_caret_ = (int)query_input_.size();
     kb_shift_ = false;
@@ -5272,115 +5355,175 @@ void App::render_loading(gfx::Renderer& rn) {
     rn.end();
 }
 
+
+void App::load_design_fonts() {
+    const float u = win_->height() / 768.f;
+    std::string dir = platform::exe_dir() + "/data/fonts/";
+    if (!std::ifstream(dir + "Inter-Regular.ttf").good()) dir = "data/fonts/";
+    std::string thai = dir + "BrickOSThai.ttf";
+    if (!std::ifstream(thai).good()) thai.clear();
+    const std::string cjk = cjk_font_path();
+    struct { int id; const char* w; float px; } spec[] = {
+        {DZ_STATUS, "SemiBold", 21}, {DZ_PCT, "SemiBold", 19}, {DZ_ROW, "Bold", 28}, {DZ_CARD, "SemiBold", 20},
+        {DZ_META, "Regular", 16}, {DZ_CHIP, "Medium", 19}, {DZ_CHIP_SEL, "SemiBold", 19}, {DZ_PILL, "SemiBold", 15},
+        {DZ_HINT, "Regular", 19}, {DZ_HINTKEY, "Bold", 16}, {DZ_LABEL, "Regular", 21}, {DZ_QUERY, "Medium", 32},
+        {DZ_KEY, "Regular", 34}, {DZ_KBTN, "SemiBold", 22}, {DZ_KHINT, "Regular", 18}, {DZ_KCHIP, "Regular", 20},
+        {DZ_BADGE, "Regular", 16}};
+    for (auto& sp : spec)
+        dz_[sp.id] = gfx::Font::load(dir + "Inter-" + sp.w + ".ttf", -sp.px * u, cjk, thai);
+    static const char* rail[6] = {"search", "home", "fav", "later", "history", "settings"};
+    std::string idir = platform::exe_dir() + "/data/icons/";
+    if (!std::ifstream(idir + "rail_home.png").good()) idir = "data/icons/";
+    for (int k = 0; k < 6; ++k) {
+        std::ifstream f(idir + "rail_" + rail[k] + ".png", std::ios::binary);
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        if (!bytes.empty()) rail_tex_[k] = gfx::Texture::from_encoded(bytes.data(), bytes.size());
+    }
+}
+
+// DESIGN.md 5.1: time left (21/600), battery % right (19/600); 56 high
+void App::design_status_bar(gfx::Renderer& rn) {
+    const int W = win_->width(); const float u = win_->height() / 768.f;
+    const float h = 56*u;
+    char clock[16]; time_t now = time(nullptr); strftime(clock, sizeof clock, "%H:%M", localtime(&now));
+    rn.text(dz(DZ_STATUS), clock, 32*u, (h - dz(DZ_STATUS).line_height()) / 2, dzc::text);
+    static unsigned last = 0; static int pct = -1;
+    if (pct < 0 || SDL_GetTicks() - last > 30000) {
+        last = SDL_GetTicks(); pct = -1;
+        for (const char* p : {"/sys/class/power_supply/axp2202-battery/capacity", "/sys/class/power_supply/battery/capacity"}) {
+            std::ifstream f(p); int v; if (f >> v) { pct = v; break; }
+        }
+    }
+    if (pct >= 0) {
+        std::string s = std::to_string(pct) + "%";
+        rn.text(dz(DZ_PCT), s, W - 32*u - dz(DZ_PCT).text_width(s), (h - dz(DZ_PCT).line_height()) / 2, dzc::text);
+    }
+}
+
+// DESIGN.md 5.2: 64 high, 1px #1C1C1E top line, 32x32 #2C2C2E circles (wide buttons a pill), labels 19 #A1A1A6
+void App::design_hint_bar(gfx::Renderer& rn, const std::vector<std::pair<std::string, std::string>>& hints) {
+    const int W = win_->width(), H = win_->height(); const float u = H / 768.f;
+    const float top = H - 64*u, cy = top + 32*u;
+    rn.quad({0, top, (float)W, 64*u}, dzc::bg);
+    rn.quad({0, top, (float)W, std::max(1.f, u)}, dzc::s1);
+    float x = 40*u;
+    for (auto& h : hints) {
+        const gfx::Font& kf = dz(DZ_HINTKEY);
+        bool wide = h.first.size() > 1;
+        float bw = wide ? kf.text_width(h.first) + 24*u : 32*u;
+        rn.round_rect({x, cy - 16*u, bw, 32*u}, 16*u, dzc::s2);
+        rn.text(kf, h.first, x + (bw - kf.text_width(h.first)) / 2, cy - kf.line_height() / 2, dzc::text);
+        x += bw + 10*u;
+        rn.text(dz(DZ_HINT), h.second, x, cy - dz(DZ_HINT).line_height() / 2, dzc::text2);
+        x += dz(DZ_HINT).text_width(h.second) + 32*u;
+    }
+}
+
 void App::render_search(gfx::Renderer& rn) {
-    // Brick OS: big-key search screen. Query field on top (the title is its
-    // placeholder), autocomplete chips under it, then the keyboard filling the rest.
+    // DESIGN.md 6.5: label, query field and suggestion chips on top; the key panel at the bottom
     const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
+    const float u = H / 768.f;
     rn.begin(W, H);
-    rn.clear(theme_.bg);
+    rn.clear(dzc::bg);
     const bool numeric = kb_numeric();
 
-    const gfx::Font& qf = *font_title_;
-    float bx = 24*s, by = 16*s, bw = W - 48*s, bh = qf.line_height() + 20*s;
-    rn.round_rect({bx, by, bw, bh}, bh / 2, theme_.chip);
-    float tx0 = bx + 30*s, avail = bw - 60*s, ty = by + (bh - qf.line_height()) / 2;
+    float x0 = 48*u, y = 36*u;
+    rn.text(dz(DZ_LABEL), kb_title_, x0, y, dzc::text2);
+    y += dz(DZ_LABEL).line_height() + 14*u;
+    const gfx::Font& qf = dz(DZ_QUERY);
+    float bw = W - 2*x0, bh = 80*u;
+    rn.round_rect({x0, y, bw, bh}, 20*u, dzc::s1);
+    float tx0 = x0 + 24*u, avail = bw - 48*u, ty = y + (bh - qf.line_height()) / 2;
     int csz = (int)query_input_.size();
     int caret = std::max(0, std::min(kb_caret_, csz));
     int start = 0;
     auto next_char = [&](int i) { i++; while (i < csz && ((unsigned char)query_input_[i] & 0xC0) == 0x80) i++; return i; };
-    while (start < caret && qf.text_width(query_input_.substr(start, caret - start)) > avail)
-        start = next_char(start);
+    while (start < caret && qf.text_width(query_input_.substr(start, caret - start)) > avail) start = next_char(start);
     std::string shown;
     for (int i = start; i < csz;) {
         int j = next_char(i);
         std::string cand = shown + query_input_.substr(i, j - i);
         if (qf.text_width(cand) > avail) break;
-        shown = std::move(cand);
-        i = j;
+        shown = std::move(cand); i = j;
     }
-    rn.text(qf, shown, tx0, ty, theme_.text);
-    if (query_input_.empty()) {
-        const std::string& ph = kb_placeholder_.empty() ? kb_title_ : kb_placeholder_;
-        rn.text(qf, ph, tx0, ty, theme_.text_dim);
-    }
+    rn.text(qf, shown, tx0, ty, dzc::text);
+    if (query_input_.empty() && !kb_placeholder_.empty()) rn.text(qf, kb_placeholder_, tx0, ty, dzc::text2);
     float caret_x = tx0 + qf.text_width(query_input_.substr(start, caret - start));
-    if ((SDL_GetTicks() / 500) % 2 == 0)
-        rn.quad({caret_x + 1*s, by + 12*s, 3*s, bh - 24*s}, theme_.text);
+    if ((SDL_GetTicks() / 500) % 2 == 0) rn.quad({caret_x + 2*u, y + (bh - 38*u) / 2, 3*u, 38*u}, dzc::accent);
+    y += bh + 14*u;
 
-    float gy = by + bh + 22*s;
-    if (!numeric) {   // autocomplete chips
-        const gfx::Font& f = *font_body_;
-        float ch = f.line_height() + 16*s, cgap = 12*s, pad = 22*s;
-        float sy = by + bh + 12*s;
-        if (sugg_.empty()) {
-            rn.text(*font_small_, query_input_.empty() ? "" : "\xE2\x80\xA6", bx + 12*s,
-                    sy + (ch - font_small_->line_height()) / 2, theme_.text_dim);
-        } else {
-            std::vector<float> xs; float x = 0;
-            for (const auto& q : sugg_) { xs.push_back(x); x += f.text_width(q) + 2*pad + cgap; }
-            float shift = 0;
-            if (sugg_focus_ && sugg_col_ < (int)sugg_.size()) {
-                float right = xs[sugg_col_] + f.text_width(sugg_[sugg_col_]) + 2*pad;
-                shift = std::max(0.f, right - (W - 48*s));
-            }
-            for (int k = 0; k < (int)sugg_.size(); ++k) {
-                float cx = bx + xs[k] - shift, cw = f.text_width(sugg_[k]) + 2*pad;
-                if (cx > W) break;
-                if (cx + cw < 0) continue;
-                bool sel = sugg_focus_ && k == sugg_col_;
-                rn.round_rect({cx, sy, cw, ch}, ch / 2, sel ? theme_.text : theme_.chip);
-                rn.text(f, sugg_[k], cx + pad, sy + (ch - f.line_height()) / 2, sel ? theme_.bg : theme_.text);
-            }
+    if (!numeric && !sugg_.empty()) {   // chips: padding 10 18, radius 12, #1C1C1E, 20px, gap 12
+        const gfx::Font& f = dz(DZ_KCHIP);
+        float ch = f.line_height() + 20*u, pad = 18*u, gap = 12*u;
+        std::vector<float> xs; float cx = 0;
+        for (const auto& q : sugg_) { xs.push_back(cx); cx += f.text_width(q) + 2*pad + gap; }
+        float shift = 0;
+        if (sugg_focus_ && sugg_col_ < (int)sugg_.size())
+            shift = std::max(0.f, xs[sugg_col_] + f.text_width(sugg_[sugg_col_]) + 2*pad - (W - 2*x0));
+        for (int k = 0; k < (int)sugg_.size(); ++k) {
+            float x = x0 + xs[k] - shift, w = f.text_width(sugg_[k]) + 2*pad;
+            if (x > W) break;
+            if (x + w < 0) continue;
+            bool sel = sugg_focus_ && k == sugg_col_;
+            rn.round_rect({x, y, w, ch}, 12*u, sel ? dzc::accent : dzc::s1);
+            rn.text(f, sugg_[k], x + pad, y + (ch - f.line_height()) / 2, sel ? dzc::white : dzc::text);
         }
-        gy = sy + ch + 16*s;
     }
 
-    float fh = font_small_->line_height() + 18*s;
+    // the panel: #121214, 1px #1C1C1E top line, padding 18 24 14, rows gap 10, keys 66 high, gap 8
     const auto& kb = numeric ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
     int nrows = (int)kb.size();
-    float gap = 10*s;
-    float keyh = (H - fh - 12*s - gy - (nrows - 1) * gap) / nrows;
-    keyh = std::min(keyh, numeric ? 110*s : 120*s);
+    float keyh = 66*u, gap = 8*u, rgap = 10*u;
+    const gfx::Font& hf = dz(DZ_KHINT);
+    float panel_h = 18*u + nrows * keyh + (nrows - 1) * rgap + 4*u + hf.line_height() + 14*u + rgap;
+    float py = H - panel_h;
+    rn.quad({0, py, (float)W, panel_h}, dzc::kb);
+    rn.quad({0, py, (float)W, std::max(1.f, u)}, dzc::s1);
     int units = 0;
-    for (const auto& row : kb) { int u = 0; for (const auto& k : row) u += k.span; units = std::max(units, u); }
-    float unit = numeric ? keyh : (W * 0.97f - (units - 1) * gap) / (float)units;
+    for (const auto& row : kb) { int n = 0; for (const auto& k : row) n += k.span; units = std::max(units, n); }
+    float inner = W - 48*u;
+    float unit = numeric ? keyh : (inner - (units - 1) * gap) / (float)units;
+    float gy = py + 18*u;
     for (int r = 0; r < nrows; ++r) {
         float roww = -gap;
         for (const auto& k : kb[r]) roww += unit * k.span + gap * k.span;
-        float x = (W - roww) / 2;
-        float ky = gy + r * (keyh + gap);
+        float x = (W - roww) / 2, ky = gy + r * (keyh + rgap);
         for (int c = 0; c < (int)kb[r].size(); ++c) {
             const Key& k = kb[r][c];
             float kw = unit * k.span + gap * (k.span - 1);
             bool sel = !sugg_focus_ && r == kb_row_ && c == kb_col_;
             gfx::Rect kr{x, ky, kw, keyh};
-            gfx::Color bg = sel ? theme_.text : (k.type == KSUBMIT) ? theme_.accent : theme_.chip;
-            rn.round_rect(kr, 12*s, bg);
-            if (k.type == KSPACE) {
-                float bar = kw * 0.42f;
-                rn.quad({kr.x + (kw - bar) / 2, kr.y + keyh * 0.68f, bar, 4*s}, sel ? theme_.bg : theme_.text_dim);
-            } else {
-                std::string lbl = (k.type == KSUBMIT) ? i18n::tr(i18n::Str::KbEnter) : k.label;
-                if (k.type == KLANG && kb_thai_) lbl = "A/\xE0\xB8\x81";
-                if (k.type == KCHAR && kb_shift_ && lbl.size() == 1 && lbl[0] >= 'a' && lbl[0] <= 'z')
-                    lbl[0] = (char)(lbl[0] - 'a' + 'A');
-                const gfx::Font* f = font_title_.get();
-                if (f->text_width(lbl) > kw - 10*s) f = font_body_.get();
-                if (f->text_width(lbl) > kw - 8*s) f = font_small_.get();
-                gfx::Color tc = sel ? theme_.bg : (k.type == KSHIFT && kb_shift_) ? theme_.accent : theme_.text;
-                rn.text(*f, lbl, kr.x + (kw - f->text_width(lbl)) / 2,
-                        kr.y + (keyh - f->line_height()) / 2, tc);
+            rn.round_rect(kr, 14*u, (sel || k.type == KSUBMIT) ? dzc::accent : dzc::s2);
+            std::string lbl = k.label; const gfx::Font* f = &dz(DZ_KEY); gfx::Color tc = sel ? dzc::white : dzc::text;
+            switch (k.type) {
+                case KSUBMIT: lbl = i18n::tr(i18n::Str::KbEnter); f = &dz(DZ_KBTN); tc = dzc::white; break;
+                case KSPACE:  lbl = i18n::tr(i18n::Str::KbSpace); f = &dz(DZ_LABEL); if (!sel) tc = dzc::text3; break;
+                case KLANG:   lbl = kb_thai_ ? "A / \xE0\xB8\x81" : "\xE0\xB8\x81 / A"; f = &dz(DZ_KBTN); break;
+                case KCHAR:
+                    if (kb_shift_ && lbl.size() == 1 && lbl[0] >= 'a' && lbl[0] <= 'z') lbl[0] = (char)(lbl[0] - 'a' + 'A');
+                    break;
+                default: break;
             }
+            if (k.type == KSHIFT && kb_shift_ && !sel) tc = dzc::accent;
+            if (f->text_width(lbl) > kw - 8*u) f = &dz(DZ_KBTN);
+            // a lone Thai mark sits where it would on a consonant: pull it to the key centre
+            float my = 0;
+            if (k.type == KCHAR && lbl.size() == 3 && (unsigned char)lbl[0] == 0xE0 && (unsigned char)lbl[1] == 0xB8) {
+                unsigned c = (unsigned char)lbl[2];
+                if (c == 0xB8 || c == 0xB9 || c == 0xBA) my = -0.28f * f->line_height();               // below: ุ ู ฺ
+                else if (c == 0xB1 || (c >= 0xB4 && c <= 0xB7)) my = 0.30f * f->line_height();      // above: ั ิ ี ึ ื
+            } else if (k.type == KCHAR && lbl.size() == 3 && (unsigned char)lbl[0] == 0xE0 && (unsigned char)lbl[1] == 0xB9) {
+                unsigned c = (unsigned char)lbl[2];
+                if (c >= 0x87 && c <= 0x8D) my = 0.30f * f->line_height();                          // ็ ่ ้ ๊ ๋ ์ ํ
+            }
+            float lw = f->text_width(lbl);
+            if (my != 0 && lw < 4*u) lw = 0;
+            rn.text(*f, lbl, kr.x + (kw - lw) / 2, kr.y + (keyh - f->line_height()) / 2 + my, tc);
             x += kw + gap;
         }
     }
-
-    rn.quad({0, H - fh, (float)W, fh}, theme_.panel);
     std::string hint = i18n::tr(numeric ? i18n::Str::FooterCastCode : i18n::Str::FooterSearch);
-    hint = font_small_->ellipsize(hint, W - 40*s);
-    rn.text(*font_small_, hint, (W - font_small_->text_width(hint)) / 2,
-            H - fh + (fh - font_small_->line_height()) / 2, theme_.text_dim);
+    rn.text(hf, hint, (W - hf.text_width(hint)) / 2, gy + nrows * keyh + (nrows - 1) * rgap + rgap + 4*u, dzc::text2);
     rn.end();
 }
 
@@ -5397,17 +5540,16 @@ bool App::kb_pad(int b) {
             if (query_input_.empty()) { mode_ = Mode::Grid; kb_mode_ = KbMode::Search; }
             else backspace();
             return true;
-        case SDL_CONTROLLER_BUTTON_Y:
+        case SDL_CONTROLLER_BUTTON_X:
             query_input_.insert(query_input_.begin() + kb_caret_, ' '); kb_caret_++;
             return true;
-        case SDL_CONTROLLER_BUTTON_X:
-            query_input_.clear(); kb_caret_ = 0;
-            return true;
-        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
+        case SDL_CONTROLLER_BUTTON_Y:
             if (!kb_numeric()) { kb_thai_ = !kb_thai_; kb_shift_ = false; kb_clamp(); }
             return true;
-        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
             if (!kb_numeric()) { kb_shift_ = !kb_shift_; kb_clamp(); }
+            return true;
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
             return true;
         case SDL_CONTROLLER_BUTTON_START:
             submit_search();

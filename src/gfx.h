@@ -84,6 +84,7 @@ private:
     void* fb_info_ = nullptr;                 // fallback stbtt_fontinfo* or nullptr
     void* thai_info_ = nullptr;               // Thai stbtt_fontinfo* or nullptr
     float thai_scale_ = 0;
+    bool latin_primary_ = false;               // em-sized (DESIGN.md) fonts: Latin from the primary (Inter)
     mutable std::unordered_map<uint32_t, Glyph> glyphs_;
     mutable int pen_x_ = 1, pen_y_ = 1, row_h_ = 0;   // shelf packer cursor
     float line_h_ = 0, ascent_ = 0, pixel_h_ = 0, scale_ = 0, fb_scale_ = 0;

@@ -68,6 +68,7 @@ const char* kKeys[(int)Str::COUNT] = {
     "FilterChannels","DurShort","DurMedium","DurLong",
     "DateToday","DateWeek","DateMonth","DateYear",
     "FilterRelevance","FilterPopularity","FooterSearchEmpty",
+    "SearchYouTube","KbSpace","KbDelete","HintPlay","HintFollow","HintTypeSearch","HintTabs",
 };
 
 // English is baked in — the source strings AND the ultimate fallback, so the UI is
@@ -151,6 +152,7 @@ const char* kEnglish[(int)Str::COUNT] = {
     "Today","This week","This month","This year",
     "Relevance","Popularity",
     "Select: filters    Y: search    Start: menu    B: back",
+    "Search YouTube","space","delete","Play","Follow channel","Type to search","Switch tabs",
 };
 
 struct Lang {

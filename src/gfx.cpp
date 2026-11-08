@@ -144,8 +144,11 @@ std::unique_ptr<Font> Font::load(const std::string& path, float pixel_h,
         return nullptr;
     }
     font->info_ = info;
+    bool em = pixel_h < 0;   // Brick OS: a negative size is a CSS-style em size (DESIGN.md px)
+    if (em) pixel_h = -pixel_h;
+    font->latin_primary_ = em;
     font->pixel_h_ = pixel_h;
-    font->scale_ = stbtt_ScaleForPixelHeight(info, pixel_h);
+    font->scale_ = em ? stbtt_ScaleForMappingEmToPixels(info, pixel_h) : stbtt_ScaleForPixelHeight(info, pixel_h);
     int asc, desc, gap; stbtt_GetFontVMetrics(info, &asc, &desc, &gap);
     font->ascent_ = asc * font->scale_;
     font->line_h_ = (asc - desc + gap) * font->scale_;
@@ -197,7 +200,7 @@ const Font::Glyph* Font::glyph(uint32_t cp) const {
     // Thai and its mark glyphs always from the Thai font; Latin and punctuation too, so a
     // line reads in one typeface (Brick OS: IBM Plex Sans Thai). Symbols (arrows, keyboard
     // keys) stay with the primary font, which has them.
-    if (thai_info_ && (thai_cp(cp) || (cp >= 0x20 && cp < 0x2070))) {
+    if (thai_info_ && (thai_cp(cp) || (!latin_primary_ && cp >= 0x20 && cp < 0x2070))) {
         auto* th = static_cast<const stbtt_fontinfo*>(thai_info_);
         if (int tg = stbtt_FindGlyphIndex(th, (int)cp)) { info = th; gi = tg; scale = thai_scale_; }
     }

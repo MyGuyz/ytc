@@ -80,6 +80,7 @@ enum class Str {
     FilterChannels, DurShort, DurMedium, DurLong,
     DateToday, DateWeek, DateMonth, DateYear,
     FilterRelevance, FilterPopularity, FooterSearchEmpty,
+    SearchYouTube, KbSpace, KbDelete, HintPlay, HintFollow, HintTypeSearch, HintTabs,
     COUNT
 };
 

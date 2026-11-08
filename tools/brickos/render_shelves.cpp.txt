@@ -1,0 +1,185 @@
+void App::follow_selected() {
+    const yt::SearchResult* v = selected();
+    if (!v || v->channel_id.empty()) return;
+    std::string name = v->is_channel() ? v->title : v->author;
+    if (fav_ids_.count(v->channel_id)) {
+        it_.remove_favorite(v->channel_id);
+        status_msg_ = i18n::tr(i18n::Str::RemovedFav) + std::string(": ") + name;
+    } else {
+        it_.add_favorite(v->channel_id, name);
+        status_msg_ = i18n::tr(i18n::Str::AddedFav) + std::string(": ") + name;
+    }
+    status_until_ = SDL_GetTicks() + 4000;
+    refresh_favorites();
+}
+
+static int length_seconds(const std::string& s) {   // "1:02:03" / "8:24" -> seconds, 0 if none
+    int total = 0, part = 0; bool any = false;
+    for (char c : s) {
+        if (c >= '0' && c <= '9') { part = part * 10 + (c - '0'); any = true; }
+        else if (c == ':') { total = total * 60 + part; part = 0; }
+        else if (c != ' ') return 0;
+    }
+    return any ? total * 60 + part : 0;
+}
+
+void App::render_shelves(gfx::Renderer& rn) {
+    // DESIGN.md 6.4: status bar, the icon rail, search pill + tab chips, rows of cards, the hint bar
+    using S = i18n::Str;
+    const int W = win_->width(), H = win_->height();
+    const float u = H / 768.f;
+    rn.begin(W, H);
+    rn.clear(dzc::bg);
+    if (shelves_src_n_ != results_.size()) rebuild_shelves();
+
+    const float bar = 56*u, rail_w = 96*u, cx0 = rail_w + 16*u, top_y = bar + 12*u, pill_h = 48*u;
+    const float rows_top = top_y + pill_h, hint_top = H - 64*u;
+    const float cardw = 300*u, gap = 20*u, thumbh = 169*u, rad = 18*u;
+    const gfx::Font &rf = dz(DZ_ROW), &cf = dz(DZ_CARD), &mf = dz(DZ_META);
+    const float head = 22*u + rf.line_height() + 12*u;
+    auto row_h = [&](const Shelf& sh) {
+        return (sh.title.empty() ? 12*u : head) + thumbh + 8*u + cf.line_height() + 8*u + mf.line_height();
+    };
+
+    int fr = 0, fc = 0;
+    bool have = locate_shelf(sel_, fr, fc);
+    float target = 0;
+    for (int r = 0; r < fr && have; ++r) target += row_h(shelves_[r]);
+    shelves_scroll_ += (target - shelves_scroll_) * 0.3f;
+    if (std::abs(target - shelves_scroll_) < 0.5f) shelves_scroll_ = target;
+
+    if (results_.empty()) browse_empty_overlay(rn);
+    float y = rows_top - shelves_scroll_;
+    for (int r = 0; r < (int)shelves_.size(); ++r) {
+        const Shelf& sh = shelves_[r];
+        float rh = row_h(sh);
+        if (y > hint_top) break;
+        int n = (int)sh.idx.size();
+        int col = (have && r == fr) ? fc : std::min(shelf_col_[r], n - 1);
+        float content_w = n * (cardw + gap) - gap, view_w = W - cx0 - 32*u;
+        float tx = content_w <= view_w ? 0.f : std::min(col * (cardw + gap), content_w - view_w);
+        shelf_off_[r] += (tx - shelf_off_[r]) * 0.3f;
+        if (std::abs(tx - shelf_off_[r]) < 0.5f) shelf_off_[r] = tx;
+        if (y + rh < rows_top - 40*u) { y += rh; continue; }
+        float ty = y + (sh.title.empty() ? 12*u : head);
+        if (!sh.title.empty()) rn.text(rf, sh.title, cx0, y + 22*u, dzc::text);
+        for (int c = 0; c < n; ++c) {
+            float x = cx0 + c * (cardw + gap) - shelf_off_[r];
+            int i = sh.idx[c];
+            const yt::SearchResult& v = results_[i];
+            if (x + cardw < -2*cardw || x > W + 2*cardw) continue;
+            if (!v.thumbnail_url.empty()) thumbs_.request(v.thumbnail_url);
+            else if (v.is_channel()) { std::string av = chan_meta_.avatar(v.channel_id);
+                                       if (!av.empty()) thumbs_.request(av); }
+            if (x + cardw < 0 || x > W) continue;
+            bool foc = have && !rail_focus_ && r == fr && c == fc;
+            gfx::Rect tr{x, ty, cardw, thumbh};
+            if (foc) {   // 5px accent ring at offset 4
+                rn.round_rect({x - 9*u, ty - 9*u, cardw + 18*u, thumbh + 18*u}, rad + 9*u, dzc::accent);
+                rn.round_rect({x - 4*u, ty - 4*u, cardw + 8*u, thumbh + 8*u}, rad + 4*u, dzc::bg);
+            }
+            rn.quad(tr, dzc::s1);
+            gfx::Color tint{1, 1, 1, 1};
+            std::string url = v.thumbnail_url;
+            if (url.empty() && v.is_channel()) url = chan_meta_.avatar(v.channel_id);
+            if (auto* tex = url.empty() ? nullptr : thumbs_.get(url)) {
+                if (v.is_channel()) { float av = thumbh * 0.82f;
+                    rn.textured_cover({x + (cardw - av) / 2, ty + (thumbh - av) / 2, av, av}, *tex, tint); }
+                else rn.textured_cover(tr, *tex, tint);
+            } else if (v.is_post()) {
+                rn.text(mf, mf.ellipsize(v.title.substr(0, v.title.find('\n')), cardw - 24*u), x + 12*u, ty + 12*u, dzc::text2);
+            }
+            // watched bar: 5 high, #FF453A, along the bottom by the saved position
+            int len = length_seconds(v.length_text);
+            if (len > 0 && !v.video_id.empty()) {
+                double pos = it_.resume_pos(v.video_id);
+                if (pos > 0) rn.quad({x, ty + thumbh - 5*u, (float)(cardw * std::min(1.0, pos / len)), 5*u}, dzc::red);
+            }
+            std::string pill = v.is_short ? std::string() : v.is_playlist() ? v.view_count_text : v.length_text;
+            if (!pill.empty()) {   // duration: 15/600, black, radius 8, padding 3 8, 10 from the right, 12 from the bottom
+                const gfx::Font& pf = dz(DZ_PILL);
+                float pw = pf.text_width(pill) + 16*u, ph = pf.line_height() + 6*u;
+                gfx::Rect pr{x + cardw - 10*u - pw, ty + thumbh - 12*u - ph, pw, ph};
+                rn.round_rect(pr, 8*u, dzc::bg);
+                rn.text(pf, pill, pr.x + 8*u, pr.y + 3*u, dzc::text);
+            }
+            rn.round_corners(tr, rad, dzc::bg);
+            std::string title = v.is_post() ? v.title.substr(0, v.title.find('\n')) : v.title;
+            rn.text(cf, cf.ellipsize(title, cardw), x, ty + thumbh + 8*u, dzc::text);
+            std::string meta;
+            auto add = [&](const std::string& p) { if (!p.empty()) meta += (meta.empty() ? "" : " \xC2\xB7 ") + p; };
+            if (v.is_channel()) add(v.subs_text);
+            else { add(v.author); add(v.view_count_text); add(v.published_text); }
+            rn.text(mf, mf.ellipsize(meta, cardw), x, ty + thumbh + 8*u + cf.line_height() + 8*u, dzc::text2);
+        }
+        y += rh;
+    }
+
+    // top bar over what scrolls under it: search pill 260x48, the tab chips, the quality badge
+    rn.quad({0, 0, (float)W, rows_top}, dzc::bg);
+    design_status_bar(rn);
+    rn.round_rect({cx0, top_y, 260*u, pill_h}, 24*u, dzc::s1);
+    if (rail_tex_[0]) rn.textured({cx0 + 18*u, top_y + (pill_h - 22*u) / 2, 22*u, 22*u}, *rail_tex_[0], dzc::text2);
+    std::string q = (!query_.empty() && !in_channel_view_) ? query_ : std::string(i18n::tr(S::Search));
+    rn.text(dz(DZ_HINT), dz(DZ_HINT).ellipsize(q, 260*u - 70*u), cx0 + 52*u,
+            top_y + (pill_h - dz(DZ_HINT).line_height()) / 2, dzc::text2);
+    float chip_x = cx0 + 260*u + 12*u, right = W - 32*u;
+    {   // quality badge: 16, #A1A1A6, 1px #3A3A3C, radius 10, padding 5 10
+        int mh = effective_max_height();
+        std::string qb = mh > 0 ? std::to_string(mh) + "p" : std::string("Auto");
+        const gfx::Font& bf = dz(DZ_BADGE);
+        float bw = bf.text_width(qb) + 20*u, bh = bf.line_height() + 10*u;
+        gfx::Rect br{right - bw, top_y + (pill_h - bh) / 2, bw, bh};
+        rn.round_rect(br, 10*u, dzc::s3);
+        rn.round_rect({br.x + u, br.y + u, br.w - 2*u, br.h - 2*u}, 9*u, dzc::bg);
+        rn.text(bf, qb, br.x + 10*u, br.y + 5*u, dzc::text2);
+        right = br.x - 12*u;
+    }
+    if (channel_tabs_active() || home_tabs_active() || search_tabs_active()) {
+        int active = channel_tabs_active() ? chan_tab_ : search_tabs_active() ? search_tab_ : home_tab_;
+        const S kTabs[]       = {S::TabAll, S::TabVideos, S::TabShorts, S::TabPosts, S::TabPlaylists};
+        const S kSearchTabs[] = {S::TabAll, S::TabVideos, S::TabShorts, S::FilterChannels, S::TabPlaylists};
+        const S* tabs = search_tabs_active() ? kSearchTabs : kTabs;
+        float ch = 44*u, cy = top_y + (pill_h - ch) / 2;
+        for (int i = 0; i < 5; ++i) {
+            bool st = i == active;
+            const gfx::Font& f = dz(st ? DZ_CHIP_SEL : DZ_CHIP);
+            const char* label = i18n::tr(tabs[i]);
+            float cw = f.text_width(label) + 40*u;
+            if (chip_x + cw > right) break;
+            rn.round_rect({chip_x, cy, cw, ch}, 22*u, st ? dzc::text : dzc::s1);
+            rn.text(f, label, chip_x + 20*u, cy + (ch - f.line_height()) / 2, st ? dzc::bg : dzc::text3);
+            chip_x += cw + 12*u;
+        }
+    } else {
+        std::string page = in_channel_view_ ? query_ : tr_view_label(view_label_);
+        if (refresh_running_) page = i18n::tr(S::Loading);
+        rn.text(rf, rf.ellipsize(page, right - chip_x), chip_x, top_y + (pill_h - rf.line_height()) / 2, dzc::text);
+    }
+
+    // the rail: 56x56 circles, 30px icons, from 92 under the status bar, gap 14; the current page on #2C2C2E.
+    // Focused (not in the mockup) it widens over the dimmed rows with the labels, as before.
+    static const S kLabels[kRailItems] = {S::Search, S::Home, S::FavoriteChannels, S::WatchLater, S::History, S::Settings};
+    float rw = rail_w;
+    if (rail_focus_) {
+        rn.quad({0, bar, (float)W, hint_top - bar}, dzc::bg.with_a(0.6f));
+        for (auto l : kLabels) rw = std::max(rw, 92*u + dz(DZ_HINT).text_width(i18n::tr(l)) + 28*u);
+        rn.quad({0, bar, rw, hint_top - bar}, dzc::s1);
+    } else rn.quad({0, bar, cx0 - 4*u, hint_top - bar}, dzc::bg);   // tiles scrolled off to the left
+    int page = rail_page();
+    for (int k = 0; k < kRailItems; ++k) {
+        float cy = bar + 92*u + 28*u + k * 70*u, cx = rail_w / 2;
+        bool hot = rail_focus_ && k == rail_sel_;
+        if (hot) rn.round_rect({10*u, cy - 28*u, rw - 20*u, 56*u}, 28*u, dzc::accent);
+        else if (k == page) rn.round_rect({cx - 28*u, cy - 28*u, 56*u, 56*u}, 28*u, dzc::s2);
+        gfx::Color ic = hot ? dzc::white : (k == page ? dzc::text : dzc::text2);
+        if (rail_tex_[k]) rn.textured({cx - 15*u, cy - 15*u, 30*u, 30*u}, *rail_tex_[k], ic);
+        if (rail_focus_)
+            rn.text(dz(DZ_HINT), i18n::tr(kLabels[k]), 92*u, cy - dz(DZ_HINT).line_height() / 2, hot ? dzc::white : dzc::text);
+    }
+
+    design_hint_bar(rn, {{"A", i18n::tr(S::HintPlay)}, {"X", i18n::tr(S::HintFollow)},
+                         {"Y", i18n::tr(S::HintTypeSearch)}, {"L1 R1", i18n::tr(S::HintTabs)}});
+    draw_status_banner(rn, rows_top, H / 720.f);
+    rn.end();
+}
