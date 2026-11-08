@@ -126,8 +126,15 @@ public:
     void quad4(float x0,float y0, float x1,float y1, float x2,float y2, float x3,float y3, Color c);
     void textured_quad4(float x0,float y0, float x1,float y1, float x2,float y2, float x3,float y3,
                         const Texture& t, Color tint = {});
+    // Filled rectangle with rounded corners (radius clamps to half the shorter side).
+    void round_rect(const Rect& r, float radius, Color c);
+    // Paint the corners of r OUTSIDE a radius in `outside`: rounds an image already
+    // drawn over a solid background. corners: 1 TL, 2 TR, 4 BR, 8 BL.
+    void round_corners(const Rect& r, float radius, Color outside, int corners = 15);
     void end();                            // flush
 private:
+    void corner(const Rect& r, float radius, int which, const Texture& t, Color c);
+    std::unique_ptr<Texture> disc_, notch_;   // 128px circle coverage and its inverse
     struct V { float x, y, u, v; float r, g, b, a; };
     void push(float x, float y, float u, float v, Color c);
     void set_texture(unsigned tex);

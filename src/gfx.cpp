@@ -1,3 +1,5 @@
+#include <cmath>
+#include <algorithm>
 #include "gfx.h"
 extern "C" {
 #include "text_thai.h"
@@ -399,6 +401,22 @@ Renderer::Renderer() {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, white);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    // Corner masks: white with alpha = coverage of a radius-64 circle centred in a
+    // 128px square (disc) and its complement (notch); each corner samples a quadrant.
+    std::vector<uint8_t> disc(128 * 128 * 4), notch(128 * 128 * 4);
+    for (int y = 0; y < 128; ++y)
+        for (int x = 0; x < 128; ++x) {
+            float dx = x + 0.5f - 64, dy = y + 0.5f - 64;
+            float cov = 64.5f - std::sqrt(dx * dx + dy * dy);
+            cov = cov < 0 ? 0 : cov > 1 ? 1 : cov;
+            uint8_t* d = &disc[(y * 128 + x) * 4];
+            uint8_t* n = &notch[(y * 128 + x) * 4];
+            d[0] = d[1] = d[2] = n[0] = n[1] = n[2] = 255;
+            d[3] = (uint8_t)(cov * 255 + 0.5f);
+            n[3] = (uint8_t)(255 - d[3]);
+        }
+    disc_ = Texture::from_rgba(disc.data(), 128, 128);
+    notch_ = Texture::from_rgba(notch.data(), 128, 128);
 }
 Renderer::~Renderer() {
     if (vbo_) glDeleteBuffers(1, &vbo_);
@@ -456,6 +474,30 @@ void Renderer::textured_quad4(float x0,float y0, float x1,float y1, float x2,flo
     set_texture(t.id());
     push(x0,y0,0,0,tint); push(x1,y1,1,0,tint); push(x2,y2,1,1,tint);
     push(x0,y0,0,0,tint); push(x2,y2,1,1,tint); push(x3,y3,0,1,tint);
+}
+void Renderer::corner(const Rect& r, float rad, int which, const Texture& t, Color c) {
+    // which: 0 TL, 1 TR, 2 BR, 3 BL — the matching quadrant of the 128px mask.
+    float x = (which == 1 || which == 2) ? r.x + r.w - rad : r.x;
+    float y = (which >= 2) ? r.y + r.h - rad : r.y;
+    float u0 = (which == 1 || which == 2) ? 0.5f : 0.f, v0 = (which >= 2) ? 0.5f : 0.f;
+    float u1 = u0 + 0.5f, v1 = v0 + 0.5f;
+    set_texture(t.id());
+    push(x, y, u0,v0, c);         push(x+rad, y, u1,v0, c);     push(x+rad, y+rad, u1,v1, c);
+    push(x, y, u0,v0, c);         push(x+rad, y+rad, u1,v1, c); push(x, y+rad, u0,v1, c);
+}
+void Renderer::round_rect(const Rect& r, float rad, Color c) {
+    rad = std::min(rad, std::min(r.w, r.h) / 2);
+    if (rad < 1 || !disc_) { quad(r, c); return; }
+    quad({r.x + rad, r.y, r.w - 2*rad, r.h}, c);
+    quad({r.x, r.y + rad, rad, r.h - 2*rad}, c);
+    quad({r.x + r.w - rad, r.y + rad, rad, r.h - 2*rad}, c);
+    for (int k = 0; k < 4; ++k) corner(r, rad, k, *disc_, c);
+}
+void Renderer::round_corners(const Rect& r, float rad, Color outside, int corners) {
+    rad = std::min(rad, std::min(r.w, r.h) / 2);
+    if (rad < 1 || !notch_) return;
+    for (int k = 0; k < 4; ++k)
+        if (corners & (1 << k)) corner(r, rad, k, *notch_, outside);
 }
 void Renderer::text(const Font& f, const std::string& s0, float x, float y, Color c) {
     const std::string s = thai_shape(s0);

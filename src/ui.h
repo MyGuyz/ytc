@@ -21,14 +21,17 @@
 namespace ui {
 
 struct Theme {
-    gfx::Color bg        = gfx::Color::rgb(0x0f1116);
-    gfx::Color panel     = gfx::Color::rgb(0x181b22);
-    gfx::Color card      = gfx::Color::rgb(0x1e222b);
-    gfx::Color card_sel  = gfx::Color::rgb(0x2b3140);
+    // Brick OS: iOS-style dark (system background / grouped cells / labels).
+    gfx::Color bg        = gfx::Color::rgb(0x000000);
+    gfx::Color panel     = gfx::Color::rgb(0x1c1c1e);
+    gfx::Color card      = gfx::Color::rgb(0x1c1c1e);
+    gfx::Color card_sel  = gfx::Color::rgb(0x3a3a3c);
     gfx::Color accent    = gfx::Color::rgb(0xff3b30); // YouTube-ish red
-    gfx::Color text       = gfx::Color::rgb(0xf2f4f8);
-    gfx::Color text_dim  = gfx::Color::rgb(0x9aa3b2);
-    gfx::Color thumb_bg  = gfx::Color::rgb(0x0a0c10);
+    gfx::Color text       = gfx::Color::rgb(0xffffff);
+    gfx::Color text_dim  = gfx::Color::rgb(0x98989f);
+    gfx::Color thumb_bg  = gfx::Color::rgb(0x2c2c2e);
+    gfx::Color ring      = gfx::Color::rgb(0xffffff); // focus ring / active tab
+    gfx::Color chip      = gfx::Color::rgb(0x2c2c2e); // idle tab
 };
 
 // Downloads thumbnail bytes on a worker thread; textures are created on the GL
@@ -657,6 +660,7 @@ private:
     // Per-video overrides from the player options menu (NOT persisted; the global
     // Settings values are untouched and return on the next video). -1 = none.
     int quality_override_ = -1;     // max_height for THIS video (0 = Auto)
+    int quality_ceil_ = 0;          // YTC_QUALITY_CEIL: highest choosable height (0 = none)
     int aspect_override_ = -1;      // 0 Fit / 1 Zoom / 2 Stretch for THIS video
     int effective_max_height() const { return quality_override_ >= 0 ? quality_override_ : play_prefs_.max_height; }
     int effective_aspect() const     { return aspect_override_ >= 0 ? aspect_override_ : aspect_mode_; }

@@ -508,6 +508,11 @@ App::App(const std::string& config_path, gfx::Window* win)
         const char* mh = getenv("YTC_MAXHEIGHT");
         int def = mh ? atoi(mh) : 1080;
         play_prefs_.max_height = it_.setting_int("max_height", def);
+        // A device ceiling (Brick OS: 720 on the A133P) clamps a saved choice too.
+        if (const char* c = getenv("YTC_QUALITY_CEIL")) quality_ceil_ = atoi(c);
+        if (quality_ceil_ > 0 &&
+            (play_prefs_.max_height <= 0 || play_prefs_.max_height > quality_ceil_))
+            play_prefs_.max_height = quality_ceil_;
     }
 }
 
@@ -1553,8 +1558,10 @@ void App::adjust_setting(MenuAction a, int dir) {
     }
     if (a == MenuAction::CycleMaxQuality) {
         // Ordered low->high so Right raises quality; Auto (highest) sits at the top end.
-        static const int steps[] = {360, 480, 720, 1080, 1440, 2160, 0 /* Auto */};
-        int n = (int)(sizeof(steps)/sizeof(steps[0]));
+        static const int all_steps[] = {360, 480, 720, 1080, 1440, 2160, 0 /* Auto */};
+        int steps[7], n = 0;
+        for (int q : all_steps)   // the device ceiling drops what it cannot decode (and Auto)
+            if (quality_ceil_ <= 0 || (q > 0 && q <= quality_ceil_)) steps[n++] = q;
         int cur = 0;
         int from = player_menu_kind(menu_kind_) ? effective_max_height() : play_prefs_.max_height;
         for (int i = 0; i < n; ++i) if (steps[i] == from) { cur = i; break; }
@@ -3953,22 +3960,21 @@ void App::render_menu(gfx::Renderer& rn) {
     }
     float ph = title_h + vis*(ih+gap) + foot_h;
     float px = (W-iw)/2, py = (H-ph)/2;
-    rn.quad({px-24*s, py-24*s, iw+48*s, ph+48*s}, theme_.panel);
-    rn.quad({px-24*s, py-24*s, iw+48*s, 4*s}, theme_.accent);
-    std::string heading = (menu_kind_ == MenuKind::Main) ? "Menu"
-                        : (menu_kind_ == MenuKind::Settings) ? "Settings"
+    rn.round_rect({px-24*s, py-24*s, iw+48*s, ph+48*s}, 24*s, theme_.panel);
+    std::string heading = (menu_kind_ == MenuKind::Main) ? std::string("YTC")
+                        : (menu_kind_ == MenuKind::Settings) ? std::string(i18n::tr(i18n::Str::Settings))
                         : (menu_kind_ == MenuKind::SettingsAudio)
-                          ? std::string("Settings \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetAudioMenu)
+                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetAudioMenu)
                         : (menu_kind_ == MenuKind::SettingsVideo)
-                          ? std::string("Settings \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetVideoMenu)
+                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetVideoMenu)
                         : (menu_kind_ == MenuKind::SettingsCaptions)
-                          ? std::string("Settings \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetCaptionsMenu)
+                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetCaptionsMenu)
                         : (menu_kind_ == MenuKind::SettingsPlayback)
-                          ? std::string("Settings \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetPlaybackMenu)
+                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetPlaybackMenu)
                         : (menu_kind_ == MenuKind::SettingsBrowsing)
-                          ? std::string("Settings \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetBrowsingMenu)
+                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetBrowsingMenu)
                         : (menu_kind_ == MenuKind::SettingsHomeFeed)
-                          ? std::string("Settings \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetHomeFeed)
+                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetHomeFeed)
                         : (menu_kind_ == MenuKind::PlayerPlayback)
                           ? std::string(i18n::tr(i18n::Str::SetPlaybackMenu))
                         : (menu_kind_ == MenuKind::FeedManage)
@@ -3986,8 +3992,7 @@ void App::render_menu(gfx::Renderer& rn) {
     for (int k = 0; k < vis; ++k) {
         int i = first + k;
         bool sel = (i == menu_sel_);
-        rn.quad({px, iy, iw, ih}, sel ? theme_.card_sel : theme_.card);
-        if (sel) rn.quad({px, iy, 4*s, ih}, theme_.accent);
+        rn.round_rect({px, iy, iw, ih}, 12*s, sel ? theme_.card_sel : theme_.card);
         {
             const std::string& lbl = menu_items_[i].label;
             float ty = iy + (ih-font_body_->line_height())/2 + 3*s;
@@ -4051,15 +4056,13 @@ void App::render_cast_picker(gfx::Renderer& rn) {
     float iw = std::min(600.f*s, W*0.86f), ih = 58*s, gap = 8*s, title_h = 56*s, foot_h = 34*s;
     float ph = title_h + std::max(1,n)*(ih+gap) + foot_h;
     float px = (W-iw)/2, py = (H-ph)/2;
-    rn.quad({px-24*s, py-24*s, iw+48*s, ph+48*s}, theme_.panel);
-    rn.quad({px-24*s, py-24*s, iw+48*s, 4*s}, theme_.accent);
+    rn.round_rect({px-24*s, py-24*s, iw+48*s, ph+48*s}, 24*s, theme_.panel);
     rn.text(*font_body_, i18n::tr(link ? i18n::Str::CastAddDevice : i18n::Str::MenuCastToDevice),
             px, py, theme_.text_dim);
     float iy = py + title_h;
     for (int i = 0; i < n; ++i) {
         bool sel = (i == cast_sel_);
-        rn.quad({px, iy, iw, ih}, sel ? theme_.card_sel : theme_.card);
-        if (sel) rn.quad({px, iy, 4*s, ih}, theme_.accent);
+        rn.round_rect({px, iy, iw, ih}, 12*s, sel ? theme_.card_sel : theme_.card);
         std::string label;
         if (!link && i == (int)cast_devices_.size())
             label = std::string("+  ") + i18n::tr(i18n::Str::CastAddDevice);
@@ -4092,14 +4095,12 @@ void App::render_manage_devices(gfx::Renderer& rn) {
     float iw = std::min(600.f*s, W*0.86f), ih = 58*s, gap = 8*s, title_h = 56*s, foot_h = 34*s;
     float ph = title_h + n*(ih+gap) + foot_h;
     float px = (W-iw)/2, py = (H-ph)/2;
-    rn.quad({px-24*s, py-24*s, iw+48*s, ph+48*s}, theme_.panel);
-    rn.quad({px-24*s, py-24*s, iw+48*s, 4*s}, theme_.accent);
+    rn.round_rect({px-24*s, py-24*s, iw+48*s, ph+48*s}, 24*s, theme_.panel);
     rn.text(*font_body_, i18n::tr(i18n::Str::SetLinkedDevices), px, py, theme_.text_dim);
     float iy = py + title_h;
     for (int i = 0; i < n; ++i) {
         bool sel = (i == cast_manage_sel_);
-        rn.quad({px, iy, iw, ih}, sel ? theme_.card_sel : theme_.card);
-        if (sel) rn.quad({px, iy, 4*s, ih}, theme_.accent);
+        rn.round_rect({px, iy, iw, ih}, 12*s, sel ? theme_.card_sel : theme_.card);
         std::string label = (i == (int)cast_paired_.size())
             ? std::string("+  ") + i18n::tr(i18n::Str::CastAddDevice)
             : cast_paired_[i].name;
@@ -4238,7 +4239,7 @@ void App::draw_thumb(gfx::Renderer& rn, const yt::SearchResult& v,
         if (!pill.empty()) {
             float pw = font_small_->text_width(pill) + 12*s;
             gfx::Rect pr{r.x + r.w - pw - 8*s, r.y + r.h - 26*s, pw, 22*s};
-            rn.quad(pr, gfx::Color{0,0,0,0.75f*alpha});
+            rn.round_rect(pr, 6*s, gfx::Color{0,0,0,0.75f*alpha});
             rn.text(*font_small_, pill, pr.x + 6*s, pr.y + 2*s, A(theme_.text));
         }
     }
@@ -4332,8 +4333,6 @@ void App::render_browse_chrome(gfx::Renderer& rn, float hy) {
     const int W = win_->width();
     float s = win_->height() / 720.f;
     float hbar = 84 * s;
-    rn.quad({0, hy, (float)W, hbar}, theme_.panel);
-    rn.quad({0, hy+hbar-3*s, (float)W, 3*s}, theme_.accent);
     rn.text(*font_title_, "YTC", 32*s, hy+24*s, theme_.text);
     std::string sub;
     if (in_channel_view_) {
@@ -4367,7 +4366,6 @@ void App::render_browse_chrome(gfx::Renderer& rn, float hy) {
                        : search_tabs_active()  ? search_tab_ : home_tab_;
         GridMetrics tm = grid_metrics();
         float ty0 = hy + hbar;
-        rn.quad({0, ty0, (float)W, tm.tabs_h}, theme_.panel.with_a(0.6f));
         using S = i18n::Str;
         // Search omits the Posts tab (YouTube search returns no posts) but adds Channels.
         const S kTabs[]       = {S::TabAll, S::TabVideos, S::TabShorts, S::TabPosts, S::TabPlaylists};
@@ -4383,10 +4381,10 @@ void App::render_browse_chrome(gfx::Renderer& rn, float hy) {
             bool st = (i == active_tab);
             // Active tab is always the red accent (via D-pad on the strip OR the L/R
             // shoulders) — no focus outline.
-            if (st) rn.quad(chip, theme_.accent);
+            rn.round_rect(chip, chip_h / 2, st ? theme_.ring : theme_.chip);
             rn.text(*font_body_, label, tx + 18 * s,
                     ty0 + (tm.tabs_h - font_body_->line_height()) / 2 + 2 * s,
-                    st ? theme_.text : theme_.text_dim);
+                    st ? theme_.bg : theme_.text);
             tx += chip_w + 10 * s;
         }
     }
@@ -4483,11 +4481,13 @@ void App::render_grid(gfx::Renderer& rn) {
         // Card background + selection ring. The meta/footer keeps its normal color
         // when selected — the accent border alone marks the highlight.
         gfx::Rect card{x, y, cardw, cardh};
-        if (sel) rn.quad({x-4*s, y-4*s, cardw+8*s, cardh+8*s}, theme_.accent);
-        rn.quad(card, theme_.card);
+        float rad = 14*s;
+        if (sel) rn.round_rect({x-5*s, y-5*s, cardw+10*s, cardh+10*s}, rad+5*s, theme_.ring);
+        rn.round_rect(card, rad, theme_.card);
 
         const auto& v = results_[i];
         draw_thumb(rn, v, {x, y, cardw, thumbh}, s, 1.0f);
+        rn.round_corners({x, y, cardw, thumbh}, rad, sel ? theme_.ring : theme_.bg, 1|2);
         draw_meta(rn, v, i, x + 12*s, y + thumbh + 8*s, cardw - 24*s, s, 1.0f);
     }
 
