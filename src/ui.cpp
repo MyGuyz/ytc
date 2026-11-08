@@ -83,8 +83,9 @@ static std::vector<double> chapter_times(const std::string& description) {
 
 // ---------- On-screen keyboard layout ----------
 namespace {
-enum KType { KCHAR, KSPACE, KDEL, KSUBMIT, KSHIFT, KLEFT, KRIGHT };
-struct Key { const char* label; KType type; char ch; int span; };
+enum KType { KCHAR, KSPACE, KDEL, KSUBMIT, KSHIFT, KLEFT, KRIGHT, KLANG };
+// text: what a KCHAR key types when it isn't the one ASCII ch (Brick OS: Thai keys, UTF-8)
+struct Key { const char* label; KType type; char ch; int span; const char* text = nullptr; };
 // Android-TV-style QWERTY, but keeping a dedicated number row on top. `span` widens a
 // key (space/search) for layout + nav. Each row totals 10 units.
 const std::vector<std::vector<Key>> KB = {
@@ -99,9 +100,38 @@ const std::vector<std::vector<Key>> KB = {
      {"n",KCHAR,'n',1},{"m",KCHAR,'m',1},{",",KCHAR,',',1},
      {"\xE2\x8C\xAB",KDEL,0,1}},                                             // U+232B backspace
     {{"\xE2\x97\x80",KLEFT,0,1},{"\xE2\x96\xB6",KRIGHT,0,1},                  // U+25C0 / U+25B6
-     {"space",KSPACE,' ',4},{"-",KCHAR,'-',1},{"_",KCHAR,'_',1},
+     {"space",KSPACE,' ',4},{"-",KCHAR,'-',1},{"\xE0\xB8\x81/A",KLANG,0,1},   // Brick OS: ก/A
      {"Search",KSUBMIT,0,2}},
 };
+// Brick OS: Thai on the standard Kedmanee layout (TIS 820-2538), as on Thai PC and phone
+// keyboards. A lone mark is shown on a dotted circle (label) and types the mark (text).
+#define TK(t) {t, KCHAR, 0, 1, t}
+#define TM(t) {"\xE2\x97\x8C" t, KCHAR, 0, 1, t}
+const std::vector<std::vector<Key>> KB_TH = {
+    {TK("ๅ"),TK("/"),TK("-"),TK("ภ"),TK("ถ"),TM("ุ"),TM("ึ"),TK("ค"),TK("ต"),TK("จ"),TK("ข"),TK("ช")},
+    {TK("ๆ"),TK("ไ"),TK("ำ"),TK("พ"),TK("ะ"),TM("ั"),TM("ี"),TK("ร"),TK("น"),TK("ย"),TK("บ"),TK("ล"),TK("ฃ")},
+    {TK("ฟ"),TK("ห"),TK("ก"),TK("ด"),TK("เ"),TM("้"),TM("่"),TK("า"),TK("ส"),TK("ว"),TK("ง")},
+    {{"\xE2\x87\xA7",KSHIFT,0,1},
+     TK("ผ"),TK("ป"),TK("แ"),TK("อ"),TM("ิ"),TM("ื"),TK("ท"),TK("ม"),TK("ใ"),TK("ฝ"),
+     {"\xE2\x8C\xAB",KDEL,0,1}},
+    {{"\xE2\x97\x80",KLEFT,0,1},{"\xE2\x96\xB6",KRIGHT,0,1},
+     {"space",KSPACE,' ',4},{"-",KCHAR,'-',1},{"\xE0\xB8\x81/A",KLANG,0,1},
+     {"Search",KSUBMIT,0,2}},
+};
+const std::vector<std::vector<Key>> KB_TH_SHIFT = {
+    {TK("+"),TK("๑"),TK("๒"),TK("๓"),TK("๔"),TM("ู"),TK("฿"),TK("๕"),TK("๖"),TK("๗"),TK("๘"),TK("๙")},
+    {TK("๐"),TK("\""),TK("ฎ"),TK("ฑ"),TK("ธ"),TM("ํ"),TM("๊"),TK("ณ"),TK("ฯ"),TK("ญ"),TK("ฐ"),TK(","),TK("ฅ")},
+    {TK("ฤ"),TK("ฆ"),TK("ฏ"),TK("โ"),TK("ฌ"),TM("็"),TM("๋"),TK("ษ"),TK("ศ"),TK("ซ"),TK(".")},
+    {{"\xE2\x87\xA7",KSHIFT,0,1},
+     TK("("),TK(")"),TK("ฉ"),TK("ฮ"),TM("ฺ"),TM("์"),TK("?"),TK("ฒ"),TK("ฬ"),TK("ฦ"),
+     {"\xE2\x8C\xAB",KDEL,0,1}},
+    {{"\xE2\x97\x80",KLEFT,0,1},{"\xE2\x96\xB6",KRIGHT,0,1},
+     {"space",KSPACE,' ',4},{"-",KCHAR,'-',1},{"\xE0\xB8\x81/A",KLANG,0,1},
+     {"Search",KSUBMIT,0,2}},
+};
+#undef TK
+#undef TM
+
 // Dedicated numeric keypad for device linking (TV codes are digits only). A squared
 // 4-column dialpad; each row totals 4 units, keys are drawn square.
 const std::vector<std::vector<Key>> KB_NUM = {
@@ -351,9 +381,13 @@ void App::load_fonts() {
     float s = win_->height() / 720.f;
     if (s < 0.9f) s = 0.9f;
     if (s > 2.2f) s = 2.2f;
-    font_title_ = gfx::Font::load(ttf, 34 * s, cjk);
-    font_body_  = gfx::Font::load(ttf, 22 * s, cjk);
-    font_small_ = gfx::Font::load(ttf, 18 * s, cjk);
+    // Thai (Brick OS): data/fonts/BrickOSThai.ttf, IBM Plex Sans Thai with pre-placed marks.
+    std::string thai;
+    for (const std::string& c : {platform::exe_dir() + "/data/fonts/BrickOSThai.ttf", std::string("data/fonts/BrickOSThai.ttf")})
+        if (std::ifstream(c).good()) { thai = c; break; }
+    font_title_ = gfx::Font::load(ttf, 34 * s, cjk, thai);
+    font_body_  = gfx::Font::load(ttf, 22 * s, cjk, thai);
+    font_small_ = gfx::Font::load(ttf, 18 * s, cjk, thai);
     fonts_baked_h_ = win_->height();
 }
 
@@ -3529,16 +3563,22 @@ void App::input(Action a) {
         return;
     }
     if (mode_ == Mode::Search) {
-        const auto& kb = kb_numeric() ? KB_NUM : KB;
+        const auto& kb = kb_numeric() ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
         // Rows have different key counts/spans, so vertical moves are SPATIAL: keep the
         // horizontal center and land on whichever key in the target row spans it (a key
         // above the space bar lands on space, above Enter lands on Enter, etc.).
+        int units = 0;   // Brick OS: rows of different widths are centered (Thai Kedmanee)
+        for (const auto& r : kb) { int u = 0; for (const auto& k : r) u += k.span; units = std::max(units, u); }
+        auto indent = [&](int row) {
+            int u = 0; for (const auto& k : kb[row]) u += k.span;
+            return (units - u) / 2.f;
+        };
         auto xcenter = [&](int row, int col) {
-            float x = 0; for (int j = 0; j < col; ++j) x += kb[row][j].span;
+            float x = indent(row); for (int j = 0; j < col; ++j) x += kb[row][j].span;
             return x + kb[row][col].span / 2.f;
         };
         auto col_at = [&](int row, float x) {
-            float acc = 0;
+            float acc = indent(row);
             for (int j = 0; j < (int)kb[row].size(); ++j) {
                 acc += kb[row][j].span;
                 if (x < acc) return j;
@@ -4856,7 +4896,12 @@ void App::input_text(const std::string& s) {
     }
 }
 void App::backspace() {
-    if (kb_caret_ > 0) { query_input_.erase(query_input_.begin() + (kb_caret_-1)); kb_caret_--; }
+    if (kb_caret_ > 0) {   // one whole UTF-8 character
+        int b = kb_caret_ - 1;
+        while (b > 0 && ((unsigned char)query_input_[b] & 0xC0) == 0x80) b--;
+        query_input_.erase((size_t)b, (size_t)(kb_caret_ - b));
+        kb_caret_ = b;
+    }
 }
 void App::test_open_numeric_kb() {
     open_search();
@@ -4866,21 +4911,27 @@ void App::test_open_numeric_kb() {
     kb_placeholder_.clear();
 }
 void App::kb_activate() {
-    const auto& kb = kb_numeric() ? KB_NUM : KB;
+    const auto& kb = kb_numeric() ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
     const Key& k = kb[kb_row_][kb_col_];
     switch (k.type) {
         case KCHAR: {
-            char c = k.ch;
-            if (kb_shift_ && c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
-            query_input_.insert(query_input_.begin() + kb_caret_, c);
-            kb_caret_++;
-            kb_shift_ = false;                       // one-shot capital
+            std::string t = k.text ? std::string(k.text) : std::string(1, k.ch);
+            if (kb_shift_ && t.size() == 1 && t[0] >= 'a' && t[0] <= 'z') t[0] = (char)(t[0] - 'a' + 'A');
+            query_input_.insert((size_t)kb_caret_, t);
+            kb_caret_ += (int)t.size();
+            kb_shift_ = false;                       // one-shot capital (Thai: one-shot SHIFT layer)
             break;
         }
+        case KLANG:   kb_thai_ = !kb_thai_; kb_shift_ = false; break;
         case KSPACE:  query_input_.insert(query_input_.begin() + kb_caret_, ' '); kb_caret_++; break;
         case KDEL:    backspace(); break;
-        case KLEFT:   if (kb_caret_ > 0) kb_caret_--; break;
-        case KRIGHT:  if (kb_caret_ < (int)query_input_.size()) kb_caret_++; break;
+        case KLEFT:   while (kb_caret_ > 0 && ((unsigned char)query_input_[--kb_caret_] & 0xC0) == 0x80) {} break;
+        case KRIGHT:  if (kb_caret_ < (int)query_input_.size()) {
+                          kb_caret_++;
+                          while (kb_caret_ < (int)query_input_.size() &&
+                                 ((unsigned char)query_input_[kb_caret_] & 0xC0) == 0x80) kb_caret_++;
+                      }
+                      break;
         case KSHIFT:  kb_shift_ = !kb_shift_; break;
         case KSUBMIT: submit_search(); break;
     }
@@ -4955,14 +5006,17 @@ void App::render_search(gfx::Renderer& rn) {
     int csz = (int)query_input_.size();
     int caret = std::max(0, std::min(kb_caret_, csz));
     int start = 0;   // pull start rightward until the pre-caret text fits
+    auto next_char = [&](int i) { i++; while (i < csz && ((unsigned char)query_input_[i] & 0xC0) == 0x80) i++; return i; };
     while (start < caret &&
            font_body_->text_width(query_input_.substr(start, caret - start)) > avail)
-        start++;
-    std::string shown;   // extend from start while it fits
-    for (int i = start; i < csz; ++i) {
-        std::string cand = shown; cand += query_input_[i];
+        start = next_char(start);
+    std::string shown;   // extend from start while it fits, a whole character at a time
+    for (int i = start; i < csz;) {
+        int j = next_char(i);
+        std::string cand = shown + query_input_.substr(i, j - i);
         if (font_body_->text_width(cand) > avail) break;
         shown = std::move(cand);
+        i = j;
     }
     rn.text(*font_body_, shown, bx + 18*s, by + 14*s, theme_.text);
     if (query_input_.empty() && !kb_placeholder_.empty())
@@ -4973,12 +5027,14 @@ void App::render_search(gfx::Renderer& rn) {
 
     // Keyboard grid — centered; selected key drawn white (ATV style). The numeric
     // keypad (device linking) uses square keys on a narrow, centered grid.
-    const auto& kb = kb_numeric() ? KB_NUM : KB;
+    const auto& kb = kb_numeric() ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
     bool numeric = kb_numeric();
     float gap = numeric ? 14*s : 10*s;
     float keyh = numeric ? 92*s : 60*s;
+    int units = 0;   // the widest row (English rows total 10 units; Thai Kedmanee up to 13)
+    for (const auto& row : kb) { int u = 0; for (const auto& k : row) u += k.span; units = std::max(units, u); }
     float unit = numeric ? keyh                    // square digit keys
-                         : (W * 0.94f - 9*gap) / 10.f;   // qwerty: every row totals 10 units
+                         : (W * 0.94f - (units - 1)*gap) / (float)units;
     float gy = by + bh + (numeric ? 26*s : 28*s);
     for (int r = 0; r < (int)kb.size(); ++r) {
         float roww = -gap;   // true laid-out width (count each span's internal gaps too)
@@ -4999,6 +5055,7 @@ void App::render_search(gfx::Renderer& rn) {
                         sel ? theme_.bg : theme_.text_dim);
             } else {
                 std::string lbl = (k.type == KSUBMIT) ? i18n::tr(i18n::Str::KbEnter) : k.label;
+                if (k.type == KLANG && kb_thai_) lbl = "A/\xE0\xB8\x81";
                 if (k.type == KCHAR && kb_shift_ && lbl.size()==1 && lbl[0]>='a' && lbl[0]<='z')
                     lbl[0] = (char)(lbl[0]-'a'+'A');
                 const gfx::Font& f = *font_body_;

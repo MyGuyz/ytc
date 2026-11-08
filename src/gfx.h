@@ -62,8 +62,10 @@ class Font {
 public:
     // fallback_path: optional second font ("" or unreadable = none). Font file bytes
     // are shared across every Font loaded from the same path (one copy in RAM).
+    // thai_path: optional Thai font (Brick OS: res/font1-thai.ttf, marks pre-positioned in its PUA).
     static std::unique_ptr<Font> load(const std::string& ttf_path, float pixel_h,
-                                      const std::string& fallback_path = "");
+                                      const std::string& fallback_path = "",
+                                      const std::string& thai_path = "");
     ~Font();
     float line_height() const { return line_h_; }
     float text_width(const std::string& s) const;
@@ -77,9 +79,11 @@ public:
     float pixel_h() const { return pixel_h_; }
 private:
     std::unique_ptr<Texture> atlas_;
-    std::shared_ptr<const std::vector<uint8_t>> ttf_, fb_ttf_;  // file bytes (fontinfos point here)
+    std::shared_ptr<const std::vector<uint8_t>> ttf_, fb_ttf_, thai_ttf_;  // file bytes (fontinfos point here)
     void* info_ = nullptr;                    // stbtt_fontinfo* (opaque; gfx.cpp only)
     void* fb_info_ = nullptr;                 // fallback stbtt_fontinfo* or nullptr
+    void* thai_info_ = nullptr;               // Thai stbtt_fontinfo* or nullptr
+    float thai_scale_ = 0;
     mutable std::unordered_map<uint32_t, Glyph> glyphs_;
     mutable int pen_x_ = 1, pen_y_ = 1, row_h_ = 0;   // shelf packer cursor
     float line_h_ = 0, ascent_ = 0, pixel_h_ = 0, scale_ = 0, fb_scale_ = 0;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ytc CXX)
+project(ytc C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -67,7 +67,7 @@ if(BUILD_UI)
   endif()
 
   if(SDL2_FOUND AND GL_OK)
-    add_library(ytgfx STATIC src/gfx.cpp src/ui.cpp src/player.cpp src/stream.cpp src/remux.cpp src/i18n.cpp)
+    add_library(ytgfx STATIC src/gfx.cpp src/ui.cpp src/player.cpp src/stream.cpp src/remux.cpp src/i18n.cpp src/text_thai.c)
     target_include_directories(ytgfx PUBLIC ${SDL2_INCLUDE_DIRS} ${GL_INCS})
     target_link_libraries(ytgfx PUBLIC ytcore ${SDL2_LIBRARIES} ${GL_LIBS} Threads::Threads)
     # pkg-config libs (SDL2/GLES) live in a prefix that isn't a default linker path on
@@ -111,7 +111,7 @@ if(BUILD_UI)
 
     # ytc_setup: the hardware-decode downloader (detection + prompt + fetch).
     # Small on purpose: gfx + http only, no innertube/mpv.
-    add_executable(yt_setup src/main_setup.cpp src/gfx.cpp)
+    add_executable(yt_setup src/main_setup.cpp src/gfx.cpp src/text_thai.c)
     target_include_directories(yt_setup PRIVATE ${SDL2_INCLUDE_DIRS} ${GL_INCS})
     target_link_libraries(yt_setup PRIVATE ytcore ${SDL2_LIBRARIES} ${GL_LIBS} Threads::Threads)
     if(YTC_GL_DESKTOP)

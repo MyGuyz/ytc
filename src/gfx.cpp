@@ -1,4 +1,7 @@
 #include "gfx.h"
+extern "C" {
+#include "text_thai.h"
+}
 #include <SDL.h>
 // Desktop builds (Windows/macOS/desktop Linux) use real OpenGL via GLEW to load
 // the 2.0 entry points uniformly; the ARM handhelds have only GLES2.
@@ -115,8 +118,20 @@ static std::shared_ptr<const std::vector<uint8_t>> read_font_file(const std::str
     return bytes;
 }
 
+// Thai: SDL-less stb_truetype has no shaping, so Thai marks are swapped for glyphs the
+// Thai font has pre-positioned (text_thai.c). Idempotent: shaped text shapes to itself.
+static std::string thai_shape(const std::string& s) {
+    if (!TextThai_has(s.c_str())) return s;
+    std::vector<char> out(s.size() * 2 + 16);
+    if (TextThai_toGlyphs(s.c_str(), out.data(), (int)out.size()) <= 0) return s;
+    return std::string(out.data());
+}
+static bool thai_cp(uint32_t cp) {
+    return (cp >= 0x0E00 && cp <= 0x0E7F) || (cp >= 0xF700 && cp <= 0xF72F);
+}
+
 std::unique_ptr<Font> Font::load(const std::string& path, float pixel_h,
-                                 const std::string& fallback_path) {
+                                 const std::string& fallback_path, const std::string& thai_path) {
     auto font = std::make_unique<Font>();
     font->ttf_ = read_font_file(path);
     if (!font->ttf_) return nullptr;
@@ -150,11 +165,25 @@ std::unique_ptr<Font> Font::load(const std::string& path, float pixel_h,
             }
         }
     }
+    if (!thai_path.empty()) {
+        if (auto th = read_font_file(thai_path)) {
+            auto* ti = new stbtt_fontinfo();
+            if (stbtt_InitFont(ti, th->data(), stbtt_GetFontOffsetForIndex(th->data(), 0))) {
+                float em_px = font->scale_ / stbtt_ScaleForMappingEmToPixels(info, 1.0f);
+                font->thai_scale_ = stbtt_ScaleForMappingEmToPixels(ti, em_px);
+                font->thai_ttf_ = std::move(th);
+                font->thai_info_ = ti;
+            } else {
+                delete ti;
+            }
+        }
+    }
     return font;
 }
 Font::~Font() {
     delete static_cast<stbtt_fontinfo*>(info_);
     delete static_cast<stbtt_fontinfo*>(fb_info_);
+    delete static_cast<stbtt_fontinfo*>(thai_info_);
 }
 
 const Font::Glyph* Font::glyph(uint32_t cp) const {
@@ -162,7 +191,12 @@ const Font::Glyph* Font::glyph(uint32_t cp) const {
     if (it != glyphs_.end()) return it->second.w < 0 ? nullptr : &it->second;
     auto* info = static_cast<const stbtt_fontinfo*>(info_);
     float scale = scale_;
-    int gi = stbtt_FindGlyphIndex(info, (int)cp);
+    int gi = 0;
+    if (thai_info_ && thai_cp(cp)) {   // Thai and its mark glyphs always from the Thai font
+        auto* th = static_cast<const stbtt_fontinfo*>(thai_info_);
+        if (int tg = stbtt_FindGlyphIndex(th, (int)cp)) { info = th; gi = tg; scale = thai_scale_; }
+    }
+    if (gi == 0) gi = stbtt_FindGlyphIndex(info, (int)cp);
     if (gi == 0 && fb_info_) {
         auto* fb = static_cast<const stbtt_fontinfo*>(fb_info_);
         if (int fg = stbtt_FindGlyphIndex(fb, (int)cp)) { info = fb; gi = fg; scale = fb_scale_; }
@@ -223,7 +257,8 @@ const Font::Glyph* Font::glyph(uint32_t cp) const {
     auto [ins, ok] = glyphs_.emplace(cp, g);
     return &ins->second;
 }
-float Font::text_width(const std::string& s) const {
+float Font::text_width(const std::string& s0) const {
+    const std::string s = thai_shape(s0);
     float w = 0;
     size_t i = 0;
     while (i < s.size()) {
@@ -232,7 +267,8 @@ float Font::text_width(const std::string& s) const {
     }
     return w;
 }
-std::string Font::ellipsize(const std::string& s, float max_w) const {
+std::string Font::ellipsize(const std::string& s0, float max_w) const {
+    const std::string s = thai_shape(s0);
     if (text_width(s) <= max_w) return s;
     float ell = text_width("...");
     std::string out;
@@ -421,7 +457,8 @@ void Renderer::textured_quad4(float x0,float y0, float x1,float y1, float x2,flo
     push(x0,y0,0,0,tint); push(x1,y1,1,0,tint); push(x2,y2,1,1,tint);
     push(x0,y0,0,0,tint); push(x2,y2,1,1,tint); push(x3,y3,0,1,tint);
 }
-void Renderer::text(const Font& f, const std::string& s, float x, float y, Color c) {
+void Renderer::text(const Font& f, const std::string& s0, float x, float y, Color c) {
+    const std::string s = thai_shape(s0);
     set_texture(f.atlas()->id());
     float pen_x = x, pen_y = y + f.ascent_;   // y is top of line
     size_t i = 0;
