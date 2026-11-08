@@ -198,3 +198,19 @@ edit("src/ui.cpp", [
      """(std::string(i18n::tr(i18n::Str::Settings)) + " \\xE2\\x80\\xA3 ")"""),
 ], count=6)
 print("patched")
+
+# --- search keyboard -------------------------------------------------------------
+edit("src/ui.cpp", [
+    ("""    rn.quad({0, 0, (float)W, hbar}, theme_.panel);
+    rn.quad({0, hbar-3*s, (float)W, 3*s}, theme_.accent);
+    rn.text(*font_title_, kb_title_, 32*s, 24*s, theme_.text);""",
+     """    rn.text(*font_title_, kb_title_, 32*s, 24*s, theme_.text);"""),
+    ("""    rn.quad({bx, by, bw, bh}, theme_.card);
+    rn.quad({bx, by, 4*s, bh}, theme_.accent);""",
+     """    rn.round_rect({bx, by, bw, bh}, 14*s, theme_.chip);"""),
+    ("""                          : (k.type == KSUBMIT) ? theme_.accent : theme_.card;
+            rn.quad(kr, bg);""",
+     """                          : (k.type == KSUBMIT) ? theme_.accent : theme_.chip;
+            rn.round_rect(kr, 10*s, bg);"""),
+])
+print("keyboard patched")

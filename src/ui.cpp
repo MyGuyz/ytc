@@ -4993,14 +4993,11 @@ void App::render_search(gfx::Renderer& rn) {
 
     // Header.
     float hbar = 84 * s;
-    rn.quad({0, 0, (float)W, hbar}, theme_.panel);
-    rn.quad({0, hbar-3*s, (float)W, 3*s}, theme_.accent);
     rn.text(*font_title_, kb_title_, 32*s, 24*s, theme_.text);
 
     // Query input box + blinking caret.
     float bx = 32*s, by = hbar + 28*s, bw = W - 64*s, bh = 54*s;
-    rn.quad({bx, by, bw, bh}, theme_.card);
-    rn.quad({bx, by, 4*s, bh}, theme_.accent);
+    rn.round_rect({bx, by, bw, bh}, 14*s, theme_.chip);
     // Window the text so the caret (at kb_caret_) stays visible even when it overflows.
     float avail = bw - 36*s;
     int csz = (int)query_input_.size();
@@ -5047,8 +5044,8 @@ void App::render_search(gfx::Renderer& rn) {
             bool sel = (r == kb_row_ && c == kb_col_);
             gfx::Rect kr{x, ky, kw, keyh};
             gfx::Color bg = sel ? theme_.text
-                          : (k.type == KSUBMIT) ? theme_.accent : theme_.card;
-            rn.quad(kr, bg);
+                          : (k.type == KSUBMIT) ? theme_.accent : theme_.chip;
+            rn.round_rect(kr, 10*s, bg);
             if (k.type == KSPACE) {                       // draw a space bar, not text
                 float bar = kw * 0.42f;
                 rn.quad({kr.x + (kw-bar)/2, kr.y + keyh - 16*s, bar, 3*s},
