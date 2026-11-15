@@ -5329,8 +5329,8 @@ void App::load_design_fonts() {
     struct { int id; const char* w; float px; } spec[] = {
         {DZ_STATUS, "SemiBold", 30}, {DZ_PCT, "SemiBold", 30}, {DZ_ROW, "Bold", 30}, {DZ_CARD, "SemiBold", 22},
         {DZ_META, "Regular", 18}, {DZ_CHIP, "Medium", 24}, {DZ_CHIP_SEL, "SemiBold", 24}, {DZ_PILL, "SemiBold", 18},
-        {DZ_HINT, "Regular", 30}, {DZ_HINTKEY, "Bold", 24}, {DZ_LABEL, "Regular", 21}, {DZ_QUERY, "Medium", 32},
-        {DZ_KEY, "Regular", 34}, {DZ_KBTN, "SemiBold", 22}, {DZ_KHINT, "Regular", 18}, {DZ_KCHIP, "Regular", 20},
+        {DZ_HINT, "Regular", 30}, {DZ_HINTKEY, "Bold", 24}, {DZ_LABEL, "Regular", 26}, {DZ_QUERY, "Medium", 36},
+        {DZ_KEY, "Regular", 32}, {DZ_KBTN, "SemiBold", 24}, {DZ_KHINT, "Regular", 18}, {DZ_KCHIP, "Regular", 22},
         {DZ_BADGE, "SemiBold", 20}, {DZ_HKEYW, "Bold", 22}, {DZ_SEARCH, "Regular", 24}, {DZ_TOAST, "Medium", 26},
         {DZ_DRAWER, "SemiBold", 30}, {DZ_CARD_FOC, "Bold", 22}, {DZ_SET_LABEL, "Medium", 40},
         {DZ_SET_LABEL_F, "SemiBold", 40}, {DZ_SET_VALUE, "Regular", 30}, {DZ_SET_HEAD, "Bold", 56},
@@ -5352,19 +5352,26 @@ void App::load_design_fonts() {
 }
 
 void App::render_search(gfx::Renderer& rn) {
-    // DESIGN.md 6.5: label, query field and suggestion chips on top; the key panel at the bottom
+    // brick-os DESIGN.md 7.6 (v2-KeyboardThai / -English): the status bar; the label 26, the field 80 (text 36, a
+    // primary caret), suggestion chips 48; the key panel (#121214) above the hint bar: keys 62, radius 14, gap 8,
+    // rows gap 10; the focused key in the focus colour x1.08; Search / OK in primary.
+    using S = i18n::Str;
     const int W = win_->width(), H = win_->height();
     const float u = H / 768.f;
+    bos_refresh();
     rn.begin(W, H);
     rn.clear(dzc::bg);
     const bool numeric = kb_numeric();
+    const gfx::Color surf = gfx::Color::rgb(0x1C1C1F), surf2 = gfx::Color::rgb(0x2C2C30),
+                     text2 = gfx::Color::rgb(0xB4B4BA);
+    design_status_bar(rn);
 
-    float x0 = 48*u, y = 36*u;
-    rn.text(dz(DZ_LABEL), kb_title_, x0, y, dzc::text2);
-    y += dz(DZ_LABEL).line_height() + 14*u;
+    float x0 = 40*u, y = 64*u + 4*u;
+    rn.text(dz(DZ_LABEL), kb_title_, x0, y, text2);
+    y += dz(DZ_LABEL).line_height() + 8*u;
     const gfx::Font& qf = dz(DZ_QUERY);
     float bw = W - 2*x0, bh = 80*u;
-    rn.round_rect({x0, y, bw, bh}, 20*u, dzc::s1);
+    rn.round_rect({x0, y, bw, bh}, 20*u, surf);
     float tx0 = x0 + 24*u, avail = bw - 48*u, ty = y + (bh - qf.line_height()) / 2;
     int csz = (int)query_input_.size();
     int caret = std::max(0, std::min(kb_caret_, csz));
@@ -5378,15 +5385,15 @@ void App::render_search(gfx::Renderer& rn) {
         if (qf.text_width(cand) > avail) break;
         shown = std::move(cand); i = j;
     }
-    rn.text(qf, shown, tx0, ty, dzc::text);
-    if (query_input_.empty() && !kb_placeholder_.empty()) rn.text(qf, kb_placeholder_, tx0, ty, dzc::text2);
+    rn.text(qf, shown, tx0, ty, dzc::white);
+    if (query_input_.empty() && !kb_placeholder_.empty()) rn.text(qf, kb_placeholder_, tx0, ty, text2);
     float caret_x = tx0 + qf.text_width(query_input_.substr(start, caret - start));
-    if ((SDL_GetTicks() / 500) % 2 == 0) rn.quad({caret_x + 2*u, y + (bh - 38*u) / 2, 3*u, 38*u}, dzc::accent);
-    y += bh + 14*u;
+    if ((SDL_GetTicks() / 500) % 2 == 0) rn.quad({caret_x + 2*u, y + (bh - 44*u) / 2, 3*u, 44*u}, bos_.primary);
+    y += bh + 16*u;
 
-    if (!numeric && !sugg_.empty()) {   // chips: padding 10 18, radius 12, #1C1C1E, 20px, gap 12
+    if (!numeric && !sugg_.empty()) {   // chips 48, radius 24, padding 18, gap 12, 22
         const gfx::Font& f = dz(DZ_KCHIP);
-        float ch = f.line_height() + 20*u, pad = 18*u, gap = 12*u;
+        float ch = 48*u, pad = 18*u, gap = 12*u;
         std::vector<float> xs; float cx = 0;
         for (const auto& q : sugg_) { xs.push_back(cx); cx += f.text_width(q) + 2*pad + gap; }
         float shift = 0;
@@ -5397,25 +5404,24 @@ void App::render_search(gfx::Renderer& rn) {
             if (x > W) break;
             if (x + w < 0) continue;
             bool sel = sugg_focus_ && k == sugg_col_;
-            rn.round_rect({x, y, w, ch}, 12*u, sel ? dzc::accent : dzc::s1);
-            rn.text(f, sugg_[k], x + pad, y + (ch - f.line_height()) / 2, sel ? dzc::white : dzc::text);
+            rn.round_rect({x, y, w, ch}, 24*u, sel ? bos_.focus : surf);
+            rn.text(f, sugg_[k], x + pad, y + (ch - f.line_height()) / 2, sel ? bos_.onfocus : dzc::white);
         }
     }
 
-    // the panel: #121214, 1px #1C1C1E top line, padding 18 24 14, rows gap 10, keys 66 high, gap 8
     const auto& kb = numeric ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
     int nrows = (int)kb.size();
-    float keyh = 66*u, gap = 8*u, rgap = 10*u;
-    const gfx::Font& hf = dz(DZ_KHINT);
-    float panel_h = 18*u + nrows * keyh + (nrows - 1) * rgap + 4*u + hf.line_height() + 14*u + rgap;
-    float py = H - panel_h;
-    rn.quad({0, py, (float)W, panel_h}, dzc::kb);
-    rn.quad({0, py, (float)W, std::max(1.f, u)}, dzc::s1);
+    const float keyh = 62*u, gap = 8*u, rgap = 10*u, bottom = H - 64*u;
+    float panel_h = 16*u + nrows * keyh + (nrows - 1) * rgap + 16*u;
+    float py = bottom - panel_h;
+    rn.quad({0, py, (float)W, panel_h}, gfx::Color::rgb(0x121214));
+    rn.quad({0, py, (float)W, std::max(1.f, u)}, surf);
     int units = 0;
     for (const auto& row : kb) { int n = 0; for (const auto& k : row) n += k.span; units = std::max(units, n); }
     float inner = W - 48*u;
-    float unit = numeric ? keyh : (inner - (units - 1) * gap) / (float)units;
-    float gy = py + 18*u;
+    float unit = numeric ? keyh * 1.6f : (inner - (units - 1) * gap) / (float)units;
+    float gy = py + 16*u;
+    for (int pass = 0; pass < 2; ++pass)   // the focused key last, over its neighbours
     for (int r = 0; r < nrows; ++r) {
         float roww = -gap;
         for (const auto& k : kb[r]) roww += unit * k.span + gap * k.span;
@@ -5424,38 +5430,47 @@ void App::render_search(gfx::Renderer& rn) {
             const Key& k = kb[r][c];
             float kw = unit * k.span + gap * (k.span - 1);
             bool sel = !sugg_focus_ && r == kb_row_ && c == kb_col_;
+            if (sel != (pass == 1)) { x += kw + gap; continue; }
             gfx::Rect kr{x, ky, kw, keyh};
-            rn.round_rect(kr, 14*u, (sel || k.type == KSUBMIT) ? dzc::accent : dzc::s2);
-            std::string lbl = k.label; const gfx::Font* f = &dz(DZ_KEY); gfx::Color tc = sel ? dzc::white : dzc::text;
+            if (sel) kr = {x - kw * 0.04f, ky - keyh * 0.04f, kw * 1.08f, keyh * 1.08f};
+            gfx::Color bg = sel ? bos_.focus : k.type == KSUBMIT ? bos_.primary : surf2;
+            rn.round_rect(kr, 14*u, bg);
+            std::string lbl = k.label; const gfx::Font* f = &dz(DZ_KEY);
+            gfx::Color tc = sel ? bos_.onfocus : dzc::white;
             switch (k.type) {
-                case KSUBMIT: lbl = i18n::tr(i18n::Str::KbEnter); f = &dz(DZ_KBTN); tc = dzc::white; break;
-                case KSPACE:  lbl = i18n::tr(i18n::Str::KbSpace); f = &dz(DZ_LABEL); if (!sel) tc = dzc::text3; break;
-                case KLANG:   lbl = kb_thai_ ? "A / \xE0\xB8\x81" : "\xE0\xB8\x81 / A"; f = &dz(DZ_KBTN); break;
+                case KSUBMIT:
+                    lbl = i18n::tr(kb_mode_ == KbMode::Search ? S::HintSearch : S::HintOk); f = &dz(DZ_KBTN);
+                    if (!sel) tc = bos_.onprimary;
+                    break;
+                case KSPACE: lbl = i18n::tr(S::KbSpace); f = &dz(DZ_KBTN); break;
+                case KLANG:  lbl = "\xE0\xB8\x81/A"; f = &dz(DZ_KBTN); break;
                 case KCHAR:
                     if (kb_shift_ && lbl.size() == 1 && lbl[0] >= 'a' && lbl[0] <= 'z') lbl[0] = (char)(lbl[0] - 'a' + 'A');
                     break;
                 default: break;
             }
-            if (k.type == KSHIFT && kb_shift_ && !sel) tc = dzc::accent;
-            if (f->text_width(lbl) > kw - 8*u) f = &dz(DZ_KBTN);
+            if (k.type == KSHIFT && kb_shift_ && !sel) tc = bos_.primary;
+            if (f->text_width(lbl) > kr.w - 8*u) f = &dz(DZ_KBTN);
             // a lone Thai mark sits where it would on a consonant: pull it to the key centre
             float my = 0;
             if (k.type == KCHAR && lbl.size() == 3 && (unsigned char)lbl[0] == 0xE0 && (unsigned char)lbl[1] == 0xB8) {
-                unsigned c = (unsigned char)lbl[2];
-                if (c == 0xB8 || c == 0xB9 || c == 0xBA) my = -0.28f * f->line_height();               // below: ุ ู ฺ
-                else if (c == 0xB1 || (c >= 0xB4 && c <= 0xB7)) my = 0.30f * f->line_height();      // above: ั ิ ี ึ ื
+                unsigned ch = (unsigned char)lbl[2];
+                if (ch == 0xB8 || ch == 0xB9 || ch == 0xBA) my = -0.28f * f->line_height();
+                else if (ch == 0xB1 || (ch >= 0xB4 && ch <= 0xB7)) my = 0.30f * f->line_height();
             } else if (k.type == KCHAR && lbl.size() == 3 && (unsigned char)lbl[0] == 0xE0 && (unsigned char)lbl[1] == 0xB9) {
-                unsigned c = (unsigned char)lbl[2];
-                if (c >= 0x87 && c <= 0x8D) my = 0.30f * f->line_height();                          // ็ ่ ้ ๊ ๋ ์ ํ
+                unsigned ch = (unsigned char)lbl[2];
+                if (ch >= 0x87 && ch <= 0x8D) my = 0.30f * f->line_height();
             }
             float lw = f->text_width(lbl);
             if (my != 0 && lw < 4*u) lw = 0;
-            rn.text(*f, lbl, kr.x + (kw - lw) / 2, kr.y + (keyh - f->line_height()) / 2 + my, tc);
+            rn.text(*f, lbl, kr.x + (kr.w - lw) / 2, kr.y + (kr.h - f->line_height()) / 2 + my, tc);
             x += kw + gap;
         }
     }
-    std::string hint = i18n::tr(numeric ? i18n::Str::FooterCastCode : i18n::Str::FooterSearch);
-    rn.text(hf, hint, (W - hf.text_width(hint)) / 2, gy + nrows * keyh + (nrows - 1) * rgap + rgap + 4*u, dzc::text2);
+    const char* go = i18n::tr(kb_mode_ == KbMode::Search ? S::HintSearch : S::HintOk);
+    if (numeric) design_hint_bar(rn, {{"A", i18n::tr(S::HintType)}, {"B", i18n::tr(S::HintDelete)}}, {{"START", go}});
+    else design_hint_bar(rn, {{"A", i18n::tr(S::HintType)}, {"B", i18n::tr(S::HintDelete)},
+                              {"X", i18n::tr(S::HintSpace)}, {"Y", i18n::tr(S::HintLang)}}, {{"START", go}});
     rn.end();
 }
 
