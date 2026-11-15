@@ -82,6 +82,8 @@ enum class Str {
     FilterRelevance, FilterPopularity, FooterSearchEmpty,
     SearchYouTube, KbSpace, KbDelete, HintPlay, HintFollow, HintTypeSearch, HintTabs,
     HintBack, HintOptions, HintOpen, HintClose, HintSelect, HintMenu, HintChange, HintHide, HintExit, HintComments, HintChapters, HintType, HintDelete, HintSpace, HintSearch, HintOk, HintPlayPause, HintReplies, SettingsTitle, ChapterLabel, Subscribed, Subscribe, OptQuality, OptSpeed, HintLang, HintShift,
+    DescTitle, HintScroll, HintSort,
+    HintTab, Unfollow,
     COUNT
 };
 

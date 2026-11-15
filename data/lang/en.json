@@ -250,5 +250,10 @@
   "OptQuality": "Quality",
   "OptSpeed": "Speed",
   "HintLang": "ก/A",
-  "HintShift": "Shift"
+  "HintShift": "Shift",
+  "DescTitle": "Description",
+  "HintScroll": "Scroll",
+  "HintSort": "Sort",
+  "HintTab": "Tabs",
+  "Unfollow": "Unfollow"
 }

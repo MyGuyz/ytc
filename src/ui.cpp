@@ -1635,6 +1635,7 @@ void App::render_resume_prompt(gfx::Renderer& rn) {
 
 // ---------- Description overlay ----------
 void App::open_description(const yt::SearchResult& v) {
+    desc_item_ = v;
     desc_title_ = v.title;
     desc_text_.clear();
     desc_lines_.clear();
@@ -2021,100 +2022,6 @@ static std::vector<std::string> wrap_text(const gfx::Font& f, const std::string&
     return lines;
 }
 
-void App::render_description(gfx::Renderer& rn) {
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    // Opaque backdrop: this overlay can sit over the player, whose video frame and
-    // control bar would otherwise bleed through the panel's inset margins.
-    rn.quad({0, 0, (float)W, (float)H}, theme_.bg);
-    float mx = 70*s, my = 46*s;
-    float pw = W - mx*2, ph = H - my*2;
-    rn.quad({mx, my, pw, ph}, theme_.panel);
-    rn.quad({mx, my, pw, 4*s}, theme_.accent);
-    float pad = 26*s;
-    float tx = mx + pad;
-    float wrap_w = pw - pad*2;
-    // Title: word-wrap (left-aligned) instead of a single ellipsized line, so a long
-    // title breaks at a word boundary and continues below. Capped so it can't eat the
-    // whole panel; the last shown line is ellipsized if still more remains.
-    float title_lh = font_body_->line_height() + 3*s;
-    std::vector<std::string> tlines = wrap_text(*font_body_, desc_title_, wrap_w);
-    const int kMaxTitleLines = 3;
-    float ty = my + 16*s;
-    int nt = std::min((int)tlines.size(), kMaxTitleLines);
-    for (int i = 0; i < nt; ++i) {
-        std::string line = tlines[i];
-        if (i == kMaxTitleLines - 1 && (int)tlines.size() > kMaxTitleLines)
-            line = font_body_->ellipsize(line + " \xE2\x80\xA6", wrap_w);   // … more remains
-        rn.text(*font_body_, line, tx, ty, theme_.text);
-        ty += title_lh;
-    }
-    float body_top = ty + 20*s, body_bot = my + ph - 46*s;
-    // Post with an attached video: a selectable thumbnail on top (A plays it).
-    bool has_comments_btn = desc_is_post_ && !desc_post_id_.empty();
-    int vid_idx = post_has_video_ ? 0 : -1;
-    int com_idx = has_comments_btn ? (post_has_video_ ? 1 : 0) : -1;
-    if (post_has_video_) {
-        float tw = std::min(pw - pad*2, 360*s);
-        float th = tw * 9.f/16.f;
-        gfx::Rect vr{tx, body_top, tw, th};
-        if (post_focus_ == vid_idx)   // selection border
-            rn.quad({vr.x-4*s, vr.y-4*s, vr.w+8*s, vr.h+8*s}, theme_.accent);
-        rn.quad(vr, theme_.thumb_bg);
-        gfx::Texture* vt = post_thumb_url_.empty() ? nullptr : thumbs_.get(post_thumb_url_);
-        if (vt) rn.textured_cover(vr, *vt, {1,1,1,1});
-        // Play glyph in the corner.
-        rn.text(*font_small_, post_focus_ == vid_idx ? i18n::tr(i18n::Str::PressAToPlay) : "",
-                vr.x, vr.y + vr.h + 6*s, theme_.text_dim);
-        body_top = vr.y + vr.h + 56*s;   // text starts well below the hint
-    }
-    // Selectable "Show Comments" button (A opens the comments overlay).
-    if (has_comments_btn) {
-        bool sel = (post_focus_ == com_idx);
-        std::string lbl = std::string("\xF0\x9F\x92\xAC  ") + i18n::tr(i18n::Str::MenuShowComments); // 💬
-        float bw = std::min(pw - pad*2, 300*s), bh = 44*s;
-        gfx::Rect br{tx, body_top, bw, bh};
-        rn.quad(br, sel ? theme_.card_sel : theme_.card);
-        if (sel) rn.quad({br.x, br.y, 4*s, bh}, theme_.accent);
-        rn.text(*font_small_, lbl, br.x + 14*s, br.y + (bh - font_small_->line_height())/2 + 2*s,
-                sel ? theme_.text : theme_.text_dim);
-        body_top = br.y + bh + 22*s;
-    }
-    if (desc_loading_) {
-        rn.text(*font_small_, i18n::tr(i18n::Str::LoadingDescription), tx, body_top, theme_.text_dim);
-    } else {
-        if (desc_lines_.empty() || desc_wrap_w_ != wrap_w) {
-            desc_lines_ = wrap_text(*font_small_, desc_text_, wrap_w);
-            desc_wrap_w_ = wrap_w;
-        }
-        float lh = font_small_->line_height() + 4*s;
-        float total = desc_lines_.size() * lh;
-        float view = body_bot - body_top;
-        float max_scroll = total > view ? total - view : 0;
-        if (desc_scroll_ < 0) desc_scroll_ = 0;
-        if (desc_scroll_ > max_scroll) desc_scroll_ = max_scroll;
-        float y = body_top - desc_scroll_;
-        for (const auto& l : desc_lines_) {
-            // Only draw lines whose top is at/below body_top so a scrolled line never
-            // bleeds up into the title/divider (there's no GL scissor here).
-            if (y >= body_top - 0.5f && y <= body_bot - lh * 0.4f)
-                rn.text(*font_small_, l, tx, y, theme_.text_dim);
-            y += lh;
-        }
-        if (max_scroll > 0) {   // scrollbar
-            float track_h = view, knob_h = view * (view / total);
-            if (knob_h < 24*s) knob_h = 24*s;
-            float ky = body_top + (track_h - knob_h) * (desc_scroll_ / max_scroll);
-            rn.quad({mx + pw - 8*s, body_top, 4*s, track_h}, theme_.card_sel);
-            rn.quad({mx + pw - 8*s, ky, 4*s, knob_h}, theme_.accent);
-        }
-    }
-    rn.text(*font_small_, post_has_video_ ? i18n::tr(i18n::Str::FooterPostOverlay)
-                                          : i18n::tr(i18n::Str::FooterScrollOverlay),
-            tx, my + ph - 34*s, theme_.text_dim);
-    rn.end();
-}
 
 // ---------- Comments overlay ----------
 void App::open_comments(const yt::SearchResult& t) {
@@ -2278,75 +2185,73 @@ void App::close_comments() {
     comments_paused_ = false;
 }
 
-void App::render_comments(gfx::Renderer& rn) {
+// brick-os DESIGN.md 7.5 (v2-YouTubeComments / -Description): a 640 panel on the right over the dimmed page,
+// radius 28, under the status bar; the hint bar below.
+void App::design_side_panel(gfx::Renderer& rn, gfx::Rect& panel) {
     const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    rn.quad({0, 0, (float)W, (float)H}, theme_.bg);
-    float mx = 70*s, my = 46*s;
-    float pw = W - mx*2, ph = H - my*2;
-    rn.quad({mx, my, pw, ph}, theme_.panel);
-    rn.quad({mx, my, pw, 4*s}, theme_.accent);
-    float pad = 26*s;
-    float tx = mx + pad;
-    std::string head = comments_title_;
-    if (!comments_total_.empty()) head += "  (" + comments_total_ + ")";      // real total
-    else if (!comments_.empty()) head += "  (" + std::to_string(comments_.size())
-                                       + (comments_cont_.empty() ? "" : "+") + ")";
-    rn.text(*font_body_, font_body_->ellipsize(head, pw - pad*2), tx, my + 16*s, theme_.text);
-    // Current sort, to the right of the count (only when sorting is available).
-    if (!comments_sort_top_.empty() && !comments_sort_newest_.empty()) {
-        std::string sort = i18n::tr(comments_sort_ ? i18n::Str::CommentSortNewest
-                                                   : i18n::Str::CommentSortTop);
-        float hx = tx + font_body_->text_width(font_body_->ellipsize(head, pw - pad*2)) + 20*s;
-        rn.text(*font_small_, sort, hx, my + 20*s, theme_.accent);
-    }
-    float body_top = my + 62*s, body_bot = my + ph - 46*s;
-    float wrap_w = pw - pad*2;
+    const float u = H / 768.f;
+    rn.quad({0, 0, (float)W, (float)H}, dzc::bg.with_a(0.6f));
+    design_status_bar(rn);
+    panel = {W - 16*u - 640*u, 64*u, 640*u, H - 64*u - 76*u};
+    rn.round_rect(panel, 28*u, gfx::Color::rgb(0x1C1C1F));
+}
 
-    if (comments_loading_ && comments_.empty()) {
-        rn.text(*font_small_, i18n::tr(i18n::Str::CommentsLoading), tx, body_top, theme_.text_dim);
-        rn.end(); return;
+void App::render_comments(gfx::Renderer& rn) {
+    using S = i18n::Str;
+    const int H = win_->height();
+    const float u = H / 768.f;
+    bos_refresh();
+    rn.begin(win_->width(), H);
+    gfx::Rect P;
+    design_side_panel(rn, P);
+    const gfx::Color text2 = gfx::Color::rgb(0xB4B4BA);
+    const float pad = 28*u, tx = P.x + pad;
+    const gfx::Font &hf = dz(DZ_PANEL_T), &sf = dz(DZ_SHEET_M), &nf = dz(DZ_CM_NAME), &mf = dz(DZ_CM_META),
+                    &bf = dz(DZ_CM_TEXT), &rf = dz(DZ_CM_REPLY);
+    rn.text(hf, hf.ellipsize(comments_title_, P.w - 2*pad), tx, P.y + 20*u, dzc::white);
+    std::string sub = comments_total_.empty() ? std::to_string(comments_.size()) : comments_total_;
+    sub += " " + comments_title_;
+    if (!comments_sort_top_.empty() && !comments_sort_newest_.empty())
+        sub += std::string(" \xC2\xB7 ") + i18n::tr(comments_sort_ ? S::CommentSortNewest : S::CommentSortTop);
+    float sub_y = P.y + 20*u + hf.line_height();
+    rn.text(sf, sf.ellipsize(sub, P.w - 2*pad), tx, sub_y, text2);
+    float body_top = sub_y + sf.line_height() + 18*u, body_bot = P.y + P.h - 20*u;
+    Hints hints;
+    hints.push_back({"A", i18n::tr(S::HintReplies)});
+    hints.push_back({"B", i18n::tr(S::HintClose)});
+    if (!comments_sort_top_.empty() && !comments_sort_newest_.empty()) hints.push_back({"X", i18n::tr(S::HintSort)});
+    if (comments_.empty()) {
+        rn.text(bf, i18n::tr(comments_loading_ ? S::CommentsLoading : S::CommentsEmpty), tx, body_top, text2);
+        design_hint_bar(rn, {{"B", i18n::tr(S::HintClose)}});
+        rn.end();
+        return;
     }
-    if (!comments_loading_ && comments_.empty()) {
-        rn.text(*font_small_, i18n::tr(i18n::Str::CommentsEmpty), tx, body_top, theme_.text_dim);
-        rn.text(*font_small_, i18n::tr(i18n::Str::FooterComments), tx, my + ph - 34*s, theme_.text_dim);
-        rn.end(); return;
-    }
-
-    float ind = 34*s;   // reply indent
-    // Rebuild the wrapped line list + selectable units when the data or width changes.
+    const float av = 48*u, ind = 56*u;   // avatar; a reply's indent
+    const float text_x = av + 16*u;      // from the unit's left edge
+    float wrap_w = P.w - 2*pad - text_x - 16*u;
     if (comments_dirty_ || comments_wrap_w_ != wrap_w) {
         comment_lines_.clear(); comment_units_.clear();
         auto emit = [&](const yt::Comment& c, int indent) {
             std::string name = c.author.empty() ? "\xE2\x80\x94" : c.author;
-            if (c.pinned) name = std::string("\xF0\x9F\x93\x8C ") + name;   // 📌
-            std::string sub;
-            if (!c.time.empty()) sub += c.time;
-            if (!c.likes.empty()) sub += (sub.empty()?"":"   ") + std::string("\xE2\x96\xB2 ") + c.likes;
-            if (indent == 0 && c.reply_count > 0)
-                sub += (sub.empty()?"":"   ") + std::to_string(c.reply_count) + " \xE2\x86\xB3";
-            comment_lines_.push_back({sub, 0, indent, name, c.is_creator});   // meta: name + rest
-            for (auto& l : wrap_text(*font_small_, c.text, wrap_w - indent*ind))
+            comment_lines_.push_back({c.time + "\x1F" + c.likes, 0, indent, name, c.is_creator});
+            for (auto& l : wrap_text(bf, c.text, wrap_w - indent*ind))
                 comment_lines_.push_back({l, 1, indent, "", false});
         };
         for (int i = 0; i < (int)comments_.size(); ++i) {
             const yt::Comment& c = comments_[i];
-            CommentUnit u{(int)comment_lines_.size(), 0, true, i};
+            CommentUnit cu{(int)comment_lines_.size(), 0, true, i};
             emit(c, 0);
-            // Collapsed creator reply preview (shown inline like the Android app).
             if (!c.expanded && c.has_creator_reply && c.replies_loaded)
                 for (const auto& r : c.replies) if (r.is_creator) emit(r, 1);
             if (!c.reply_token.empty()) {
                 std::string tog = !c.expanded
-                    ? std::string("\xE2\x96\xB8 ") + std::to_string(c.reply_count)
-                      + " " + i18n::tr(i18n::Str::CommentReplies)   // ▸ N replies
-                    : (c.replies_loaded ? std::string("\xE2\x96\xBE ") + i18n::tr(i18n::Str::CommentHideReplies)
-                                        : std::string("\xE2\x96\xBE ") + i18n::tr(i18n::Str::CommentsLoading));
+                    ? std::string("\xE2\x96\xB8 ") + std::to_string(c.reply_count) + " " + i18n::tr(S::CommentReplies)
+                    : (c.replies_loaded ? std::string("\xE2\x96\xBE ") + i18n::tr(S::CommentHideReplies)
+                                        : std::string("\xE2\x96\xBE ") + i18n::tr(S::CommentsLoading));
                 comment_lines_.push_back({tog, 3, 0});
             }
-            u.line_count = (int)comment_lines_.size() - u.line_start;
-            comment_units_.push_back(u);
+            cu.line_count = (int)comment_lines_.size() - cu.line_start;
+            comment_units_.push_back(cu);
             comment_lines_.push_back({"", 2, 0});
             if (c.expanded)
                 for (const auto& r : c.replies) {
@@ -2361,62 +2266,173 @@ void App::render_comments(gfx::Renderer& rn) {
     }
     if (comments_sel_ >= (int)comment_units_.size()) comments_sel_ = (int)comment_units_.size() - 1;
     if (comments_sel_ < 0) comments_sel_ = 0;
-
-    float lh = font_small_->line_height() + 4*s;
-    float total = comment_lines_.size() * lh;
-    float view = body_bot - body_top;
+    const float lh = bf.line_height() + 4*u;
+    float total = comment_lines_.size() * lh, view = body_bot - body_top;
     float max_scroll = total > view ? total - view : 0;
-    // Keep the selected unit in view.
     if (!comment_units_.empty()) {
         const CommentUnit& su = comment_units_[comments_sel_];
-        float s0 = su.line_start * lh, s1 = (su.line_start + su.line_count) * lh;
+        float s0 = su.line_start * lh - 12*u, s1 = (su.line_start + su.line_count) * lh + 12*u;
         if (s0 < comments_scroll_) comments_scroll_ = s0;
         if (s1 > comments_scroll_ + view) comments_scroll_ = s1 - view;
     }
-    if (comments_scroll_ < 0) comments_scroll_ = 0;
-    if (comments_scroll_ > max_scroll) comments_scroll_ = max_scroll;
-    // Auto-page more top-level comments when the selection nears the end.
+    comments_scroll_ = std::max(0.f, std::min(comments_scroll_, max_scroll));
     if (comments_sel_ >= (int)comment_units_.size() - 3 && !comments_cont_.empty() && !comments_running_)
         load_more_comments();
-
-    // Selection highlight (behind the selected unit's lines).
+    // the focused comment: the focus colour (radius 22)
+    int sel_first = -1, sel_last = -1;
     if (!comment_units_.empty()) {
         const CommentUnit& su = comment_units_[comments_sel_];
-        float hy = body_top + su.line_start * lh - comments_scroll_ - 3*s;
-        float hh = su.line_count * lh + 4*s;
-        if (hy < body_bot && hy + hh > body_top) {
-            float cy = std::max(hy, body_top), cb = std::min(hy + hh, body_bot);
-            rn.quad({mx + 10*s, cy, pw - 20*s, cb - cy}, theme_.card_sel);
-            rn.quad({mx + 10*s, cy, 4*s, cb - cy}, theme_.accent);
-        }
+        sel_first = su.line_start; sel_last = su.line_start + su.line_count - 1;
+        float hy = body_top + su.line_start * lh - comments_scroll_ - 12*u, hh = su.line_count * lh + 24*u;
+        float ix = P.x + 16*u + comment_lines_[su.line_start].indent * ind;
+        float top = std::max(hy, body_top - 12*u), bot = std::min(hy + hh, body_bot + 8*u);
+        if (bot > top) rn.round_rect({ix, top, P.x + P.w - 16*u - ix, bot - top}, 22*u, bos_.focus);
     }
+    static const uint32_t kAv[6] = {0x0A84FF, 0x30D158, 0xBF5AF2, 0xFF9F0A, 0xFF375F, 0x30B0C7};
     float y = body_top - comments_scroll_;
-    for (const auto& cl : comment_lines_) {
-        if (y >= body_top - 0.5f && y <= body_bot - lh * 0.4f) {
-            float x = tx + cl.indent*ind;
-            if (cl.kind == 0) {   // meta: colored author name, then dimmed time/likes
-                gfx::Color acol = cl.creator ? theme_.accent : theme_.text;
-                rn.text(*font_small_, cl.author, x, y, acol);
-                if (!cl.text.empty())
-                    rn.text(*font_small_, cl.text,
-                            x + font_small_->text_width(cl.author) + 12*s, y, theme_.text_dim);
-            } else {
-                gfx::Color col = cl.kind == 3 ? theme_.accent : theme_.text_dim;
-                rn.text(*font_small_, cl.text, x, y, col);
+    for (int li = 0; li < (int)comment_lines_.size(); ++li) {
+        const auto& cl = comment_lines_[li];
+        bool foc = li >= sel_first && li <= sel_last;
+        gfx::Color tc = foc ? bos_.onfocus : dzc::white, dc = foc ? bos_.onfocus : text2;
+        float x0 = tx + cl.indent * ind;
+        if (y >= body_top - 0.5f && y <= body_bot - lh * 0.6f) {
+            if (cl.kind == 0) {
+                // the letter circle: the name's first character (after @), a colour from the name
+                std::string nm = cl.author;
+                size_t b = nm[0] == '@' ? 1 : 0, e = b + 1;
+                while (e < nm.size() && ((unsigned char)nm[e] & 0xC0) == 0x80) e++;
+                unsigned hsh = 0;
+                for (char ch : nm) hsh = hsh * 31 + (unsigned char)ch;
+                float a = cl.indent ? 36*u : av;
+                rn.round_rect({x0, y, a, a}, a / 2, gfx::Color::rgb(kAv[hsh % 6]));
+                std::string letter = nm.substr(b, e - b);
+                rn.text(nf, letter, x0 + (a - nf.text_width(letter)) / 2, y + (a - nf.line_height()) / 2, dzc::white);
+                float x = x0 + text_x;
+                rn.text(nf, nf.ellipsize(nm, wrap_w * 0.6f), x, y, cl.creator && !foc ? bos_.primary : tc);
+                x += nf.text_width(nf.ellipsize(nm, wrap_w * 0.6f));
+                size_t sp = cl.text.find('\x1F');
+                std::string time = cl.text.substr(0, sp), likes = sp == std::string::npos ? "" : cl.text.substr(sp + 1);
+                float my = y + (nf.line_height() - mf.line_height()) / 2;
+                if (!time.empty()) {
+                    std::string t = " \xC2\xB7 " + time;
+                    rn.text(mf, t, x, my, dc);
+                    x += mf.text_width(t);
+                }
+                if (likes.find_first_of("0123456789") != std::string::npos) {
+                    rn.text(mf, " \xC2\xB7 ", x, my, dc);
+                    x += mf.text_width(" \xC2\xB7 ");
+                    bos_icon(rn, "thumb", x, y + (nf.line_height() - 20*u) / 2, 20*u, dc);
+                    rn.text(mf, " " + likes, x + 20*u, my, dc);
+                }
+            } else if (cl.kind == 1) {
+                rn.text(bf, cl.text, x0 + text_x, y, tc);
+            } else if (cl.kind == 3) {
+                rn.text(rf, cl.text, x0 + text_x, y + 4*u, foc ? bos_.onfocus : bos_.primary);
             }
         }
         y += lh;
     }
-    if (max_scroll > 0) {   // scrollbar
-        float track_h = view, knob_h = view * (view / total);
-        if (knob_h < 24*s) knob_h = 24*s;
-        float ky = body_top + (track_h - knob_h) * (comments_scroll_ / max_scroll);
-        rn.quad({mx + pw - 8*s, body_top, 4*s, track_h}, theme_.card_sel);
-        rn.quad({mx + pw - 8*s, ky, 4*s, knob_h}, theme_.accent);
-    }
-    rn.text(*font_small_, i18n::tr(i18n::Str::FooterCommentsSel), tx, my + ph - 34*s, theme_.text_dim);
+    design_hint_bar(rn, hints);
     rn.end();
 }
+
+void App::render_description(gfx::Renderer& rn) {
+    using S = i18n::Str;
+    const int H = win_->height();
+    const float u = H / 768.f;
+    bos_refresh();
+    rn.begin(win_->width(), H);
+    gfx::Rect P;
+    design_side_panel(rn, P);
+    const gfx::Color text2 = gfx::Color::rgb(0xB4B4BA);
+    const float pad = 28*u, tx = P.x + pad, wrap_w = P.w - 2*pad;
+    const gfx::Font &hf = dz(DZ_PANEL_T), &sf = dz(DZ_SHEET_M), &tf = dz(DZ_DESC_T), &pf = dz(DZ_CHIP_SEL),
+                    &bf = dz(DZ_DESC);
+    rn.text(hf, i18n::tr(desc_is_post_ ? S::TabPosts : S::DescTitle), tx, P.y + 20*u, dzc::white);
+    float y = P.y + 20*u + hf.line_height();
+    if (!desc_item_.author.empty()) {
+        rn.text(sf, sf.ellipsize(desc_item_.author, wrap_w), tx, y, text2);
+        y += sf.line_height();
+    }
+    y += 14*u;
+    std::vector<std::string> tl = wrap_text(tf, desc_title_, wrap_w);
+    for (int i = 0; i < (int)tl.size() && i < 2; ++i) {
+        std::string l = tl[i];
+        if (i == 1 && tl.size() > 2) l = tf.ellipsize(l + " \xE2\x80\xA6", wrap_w);
+        rn.text(tf, l, tx, y, dzc::white);
+        y += tf.line_height();
+    }
+    // pills: views, date (surface2, 24/600, height 40)
+    {
+        float x = tx;
+        y += 10*u;
+        bool any = false;
+        for (const std::string& p : {desc_item_.view_count_text, desc_item_.published_text}) {
+            if (p.empty()) continue;
+            std::string t = pf.ellipsize(p, wrap_w / 2);
+            float w = pf.text_width(t) + 32*u;
+            if (x + w > tx + wrap_w) break;
+            rn.round_rect({x, y, w, 40*u}, 20*u, gfx::Color::rgb(0x2C2C30));
+            rn.text(pf, t, x + 16*u, y + (40*u - pf.line_height()) / 2, dzc::white);
+            x += w + 10*u;
+            any = true;
+        }
+        if (any) y += 40*u;
+        y += 16*u;
+    }
+    float body_top = y, body_bot = P.y + P.h - 20*u;
+    bool has_comments_btn = desc_is_post_ && !desc_post_id_.empty();
+    int vid_idx = post_has_video_ ? 0 : -1;
+    int com_idx = has_comments_btn ? (post_has_video_ ? 1 : 0) : -1;
+    if (post_has_video_) {   // a post's video: a thumbnail (A plays it), the ring when focused
+        float tw = std::min(wrap_w, 320*u), th = tw * 9.f / 16.f;
+        gfx::Rect vr{tx, body_top + 8*u, tw, th};
+        if (post_focus_ == vid_idx) design_ring(rn, vr, 18*u);
+        rn.quad(vr, gfx::Color::rgb(0x2C2C30));
+        gfx::Texture* vt = post_thumb_url_.empty() ? nullptr : thumbs_.get(post_thumb_url_);
+        if (vt) rn.textured_cover(vr, *vt, {1, 1, 1, 1});
+        rn.round_corners(vr, 18*u, gfx::Color::rgb(0x1C1C1F));
+        body_top = vr.y + vr.h + 20*u;
+    }
+    if (has_comments_btn) {   // a tile: Comments
+        bool sel = post_focus_ == com_idx;
+        float bw = std::min(wrap_w, 320*u), bh = 64*u;
+        gfx::Rect br{tx, body_top, bw, bh};
+        rn.round_rect(br, 22*u, sel ? bos_.focus : gfx::Color::rgb(0x2C2C30));
+        gfx::Color c = sel ? bos_.onfocus : dzc::white;
+        bos_icon(rn, "comment", br.x + 20*u, br.y + (bh - 28*u) / 2, 28*u, sel ? c : gfx::Color::rgb(0x30D158));
+        rn.text(dz(DZ_TILE), i18n::tr(S::HintComments), br.x + 60*u, br.y + (bh - dz(DZ_TILE).line_height()) / 2, c);
+        body_top = br.y + bh + 20*u;
+    }
+    if (desc_loading_) {
+        rn.text(bf, i18n::tr(S::LoadingDescription), tx, body_top, text2);
+    } else {
+        if (desc_lines_.empty() || desc_wrap_w_ != wrap_w) {
+            desc_lines_ = wrap_text(bf, desc_text_, wrap_w);
+            desc_wrap_w_ = wrap_w;
+        }
+        float lh = bf.line_height() + 6*u;
+        float total = desc_lines_.size() * lh, view = body_bot - body_top;
+        float max_scroll = total > view ? total - view : 0;
+        desc_scroll_ = std::max(0.f, std::min(desc_scroll_, max_scroll));
+        float ly = body_top - desc_scroll_;
+        for (const auto& l : desc_lines_) {
+            if (ly >= body_top - 0.5f && ly <= body_bot - lh * 0.6f) rn.text(bf, l, tx, ly, text2);
+            ly += lh;
+        }
+        if (max_scroll > 0) {   // a thin scroll mark at the panel's right edge
+            float knob = std::max(32*u, view * (view / total));
+            float ky = body_top + (view - knob) * (desc_scroll_ / max_scroll);
+            rn.round_rect({P.x + P.w - 12*u, ky, 4*u, knob}, 2*u, gfx::Color::rgb(0x6E6E73));
+        }
+    }
+    Hints right;
+    if (post_has_video_ || has_comments_btn) right.push_back({"A", i18n::tr(S::HintOpen)});
+    right.push_back({"B", i18n::tr(S::HintClose)});
+    design_hint_bar(rn, right, {{"\xE2\x86\x91\xE2\x86\x93", i18n::tr(S::HintScroll)}});
+    rn.end();
+}
+
 
 // ---------- Context options menu ----------
 void App::open_menu() {
@@ -3588,6 +3604,13 @@ void App::input(Action a) {
         return;
     }
     if (mode_ == Mode::Playing) {
+        // DESIGN 7.5: X hides the overlay, Y opens the comments
+        if (a == Action::Sort) { controls_until_ = 0; return; }
+        if (a == Action::Search) {
+            if (!player_.paused()) { player_.set_pause(true); comments_paused_ = true; }
+            open_comments(now_playing_item_);
+            return;
+        }
         controls_until_ = SDL_GetTicks() + 2600;   // any input reveals the info overlay
         switch (a) {
             case Action::Select: player_.toggle_pause(); break;
@@ -4520,7 +4543,9 @@ void App::render_shelves(gfx::Renderer& rn) {
     rn.clear(dzc::bg);
     if (shelves_src_n_ != results_.size()) rebuild_shelves();
 
-    const float bar = 64*u, cx0 = 112*u, top_y = bar + 4*u, pill_h = 48*u;
+    // a channel: its header (102 high) above the search pill and the tabs
+    const float bar = 64*u, cx0 = 112*u, head_h = in_channel_view_ ? 102*u : 0.f;
+    const float top_y = bar + 4*u + head_h, pill_h = 48*u;
     const float rows_top = top_y + pill_h, hint_top = H - 64*u;
     const float cardw = 300*u, gap = 22*u, thumbh = 169*u, rad = 18*u;
     const gfx::Font &rf = dz(DZ_ROW), &cf = dz(DZ_CARD), &cff = dz(DZ_CARD_FOC), &mf = dz(DZ_META);
@@ -4613,6 +4638,39 @@ void App::render_shelves(gfx::Renderer& rn) {
     rn.quad({0, 0, (float)W, rows_top}, dzc::bg);
     design_status_bar(rn);
     const gfx::Color surf = gfx::Color::rgb(0x1C1C1F), text2 = gfx::Color::rgb(0xB4B4BA);
+    if (in_channel_view_) {   // avatar 96, name 44/700, "@handle · subscribers · videos" 24, the follow pill
+        const float ay = bar + 4*u, a = 96*u;
+        std::string cid = channel_info_.channel_id;
+        std::string av = channel_info_.avatar_url.empty() ? chan_meta_.avatar(cid) : channel_info_.avatar_url;
+        rn.round_rect({cx0, ay, a, a}, a / 2, bos_.primary);
+        gfx::Texture* at = av.empty() ? nullptr : (thumbs_.request(av), thumbs_.get(av));
+        if (at) { rn.textured_cover({cx0, ay, a, a}, *at, dzc::white); rn.round_corners({cx0, ay, a, a}, a / 2, dzc::bg); }
+        else {
+            std::string nm = channel_info_.name.empty() ? query_ : channel_info_.name;
+            size_t e = nm.empty() ? 0 : 1;
+            while (e < nm.size() && ((unsigned char)nm[e] & 0xC0) == 0x80) e++;
+            const gfx::Font& lf = dz(DZ_CH_NAME);
+            rn.text(lf, nm.substr(0, e), cx0 + (a - lf.text_width(nm.substr(0, e))) / 2, ay + (a - lf.line_height()) / 2,
+                    dzc::white);
+        }
+        bool fav = !cid.empty() && fav_ids_.count(cid);
+        const gfx::Font& pf = dz(DZ_CM_NAME);
+        std::string pl = i18n::tr(fav ? S::Subscribed : S::Subscribe);
+        float pw = pf.text_width(pl) + (fav ? 24*u + 10*u : 0) + 48*u, ph = 52*u;
+        gfx::Rect pr{W - 32*u - pw, ay + 22*u, pw, ph};
+        rn.round_rect(pr, ph / 2, fav ? gfx::Color::rgb(0x2C2C30) : dzc::white);
+        float px = pr.x + 24*u;
+        if (fav) { bos_icon(rn, "checkc", px, pr.y + (ph - 24*u) / 2, 24*u, gfx::Color::rgb(0x30D158)); px += 34*u; }
+        rn.text(pf, pl, px, pr.y + (ph - pf.line_height()) / 2, fav ? dzc::white : dzc::bg);
+        const gfx::Font &nf = dz(DZ_CH_NAME), &hf = dz(DZ_SHEET_M);
+        float nx = cx0 + a + 22*u, nw = pr.x - 20*u - nx;
+        std::string name = channel_info_.name.empty() ? query_ : channel_info_.name;
+        rn.text(nf, nf.ellipsize(name, nw), nx, ay + 4*u, dzc::white);
+        std::string line;
+        for (const std::string& p : {channel_info_.handle, channel_info_.subs_text, channel_info_.video_count_text})
+            if (!p.empty()) line += (line.empty() ? "" : " \xC2\xB7 ") + p;
+        rn.text(hf, hf.ellipsize(line, nw), nx, ay + 4*u + nf.line_height(), text2);
+    }
     rn.round_rect({cx0, top_y, 220*u, pill_h}, 24*u, surf);
     bos_icon(rn, "search", cx0 + 18*u, top_y + (pill_h - 24*u) / 2, 24*u, text2);
     std::string q = (!query_.empty() && !in_channel_view_) ? query_ : std::string(i18n::tr(S::Search));
@@ -4673,6 +4731,11 @@ void App::render_shelves(gfx::Renderer& rn) {
                            {"history", i18n::tr(S::History)}, {"settings", i18n::tr(S::Settings)},
                            {"list", i18n::tr(S::FavoritePlaylists)}, {"download", i18n::tr(S::Downloads)}},
                       rail_sel_, page);
+    } else if (in_channel_view_) {
+        bool fav = !channel_info_.channel_id.empty() && fav_ids_.count(channel_info_.channel_id);
+        design_hint_bar(rn, {{"A", i18n::tr(S::HintPlay)}, {"B", i18n::tr(S::HintBack)},
+                             {"X", i18n::tr(fav ? S::Unfollow : S::Subscribe)}},
+                        {{"L1 R1", i18n::tr(S::HintTab)}});
     } else {
         design_hint_bar(rn, {{"A", i18n::tr(S::HintPlay)}, {"B", i18n::tr(S::HintBack)},
                              {"X", i18n::tr(S::HintFollow)}, {"Y", i18n::tr(S::HintSearch)}},
@@ -5113,39 +5176,7 @@ void App::render_player(gfx::Renderer& rn) {
     else if (remain >= (long)kFadeMs) alpha = 1.f;
     else alpha = (float)remain / (float)kFadeMs;    // fade tail
 
-    if (alpha > 0.001f) {
-        float bar_h = 96 * s;
-        // Bottom panel for legibility.
-        rn.quad({0, (float)H - bar_h, (float)W, bar_h}, theme_.bg.with_a(0.66f * alpha));
-        gfx::Color ctext = theme_.text.with_a(alpha);
-        gfx::Color cdim  = theme_.text_dim.with_a(alpha);
-
-        // Title.
-        rn.text(*font_body_, font_body_->ellipsize(now_playing_title_, W - 64*s),
-                32*s, H - bar_h + 12*s, ctext);
-
-        // Progress bar.
-        float px = 32*s, pw = W - 64*s, py = H - 40*s, ph = 6*s;
-        rn.quad({px, py, pw, ph}, theme_.card_sel.with_a(alpha));
-        rn.quad({px, py, pw * frac, ph}, theme_.accent.with_a(alpha));
-        rn.quad({px + pw*frac - 5*s, py - 5*s, 10*s, ph + 10*s}, ctext);
-
-        // Time + control hints.
-        std::string time = tstr(pos) + " / " + (dur>0?tstr(dur):"--:--");
-        rn.text(*font_small_, time, 32*s, H - 30*s, cdim);
-        const char* hint = i18n::tr(player_.paused() ? i18n::Str::FooterPlayerPause
-                                                     : i18n::Str::FooterPlayerPlay);
-        rn.text(*font_small_, hint, W - font_small_->text_width(hint) - 32*s,
-                H - 30*s, cdim);
-
-        // Centered pause glyph for a clear paused state.
-        if (player_.paused()) {
-            float cxp = W/2.f, cyp = H*0.46f, bw = 13*s, bh = 46*s, gap = 13*s;
-            gfx::Color pc = theme_.text.with_a(0.85f * alpha);
-            rn.quad({cxp - gap/2 - bw, cyp - bh/2, bw, bh}, pc);
-            rn.quad({cxp + gap/2,      cyp - bh/2, bw, bh}, pc);
-        }
-    }
+    if (alpha > 0.001f) player_overlay(rn, pos, dur, alpha);   // DESIGN 7.5 (ui_bos_player.cpp)
 
     // Stats for nerds — top-left overlay, always visible while enabled.
     if (stats_for_nerds_) {
@@ -5169,19 +5200,7 @@ void App::render_player(gfx::Renderer& rn) {
         long vremain = (long)volume_overlay_until_ - (long)now;
         if (vremain > 0) {
             float va = vremain >= (long)kFadeMs ? 1.f : (float)vremain / (float)kFadeMs;
-            float bw = 360*s, bh = 66*s;
-            float bx = (W - bw) / 2, by = H * 0.34f;
-            rn.quad({bx, by, bw, bh}, theme_.bg.with_a(0.72f * va));
-            gfx::Color vt = theme_.text.with_a(va);
-            char lbl[32]; std::snprintf(lbl, sizeof lbl, "Volume  %d%%", volume_);
-            rn.text(*font_small_, lbl, bx + 18*s, by + 8*s, vt);
-            // Track + fill on a 0..150 scale, with a tick at the 100% reference.
-            float tx = bx + 18*s, tw = bw - 36*s, ty = by + bh - 20*s, th = 8*s;
-            rn.quad({tx, ty, tw, th}, theme_.card_sel.with_a(va));
-            float f = volume_ / 150.f;
-            rn.quad({tx, ty, tw * f, th}, theme_.accent.with_a(va));
-            float mark = tx + tw * (100.f/150.f);
-            rn.quad({mark - 1*s, ty - 4*s, 2*s, th + 8*s}, vt);
+            player_volume(rn, va);
         }
     }
 
@@ -5315,7 +5334,11 @@ void App::load_design_fonts() {
         {DZ_BADGE, "SemiBold", 20}, {DZ_HKEYW, "Bold", 22}, {DZ_SEARCH, "Regular", 24}, {DZ_TOAST, "Medium", 26},
         {DZ_DRAWER, "SemiBold", 30}, {DZ_CARD_FOC, "Bold", 22}, {DZ_SET_LABEL, "Medium", 40},
         {DZ_SET_LABEL_F, "SemiBold", 40}, {DZ_SET_VALUE, "Regular", 30}, {DZ_SET_HEAD, "Bold", 56},
-        {DZ_TILE, "SemiBold", 28}, {DZ_SHEET_T, "Bold", 34}, {DZ_SHEET_M, "Regular", 24}};
+        {DZ_TILE, "SemiBold", 28}, {DZ_SHEET_T, "Bold", 34}, {DZ_SHEET_M, "Regular", 24},
+        {DZ_CHIP_VAL, "Bold", 26}, {DZ_CHAPTER, "SemiBold", 22},
+        {DZ_PANEL_T, "Bold", 36}, {DZ_CM_NAME, "Bold", 24}, {DZ_CM_META, "Regular", 22},
+        {DZ_CM_TEXT, "Regular", 24}, {DZ_CM_REPLY, "Bold", 22}, {DZ_DESC_T, "Bold", 30},
+        {DZ_DESC, "Regular", 26}, {DZ_CH_NAME, "Bold", 44}};
     for (auto& sp : spec)
         dz_[sp.id] = gfx::Font::load(dir + "Inter-" + sp.w + ".ttf", -sp.px * u, cjk, thai);
     static const char* rail[6] = {"search", "home", "fav", "later", "history", "settings"};

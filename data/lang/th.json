@@ -250,5 +250,10 @@
   "OptQuality": "คุณภาพ",
   "OptSpeed": "ความเร็ว",
   "HintLang": "ก/A",
-  "HintShift": "Shift"
+  "HintShift": "Shift",
+  "DescTitle": "คำอธิบาย",
+  "HintScroll": "เลื่อน",
+  "HintSort": "เรียง",
+  "HintTab": "แท็บ",
+  "Unfollow": "เลิกติดตาม"
 }

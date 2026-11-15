@@ -808,7 +808,9 @@ private:
     enum DZ { DZ_STATUS, DZ_PCT, DZ_ROW, DZ_CARD, DZ_META, DZ_CHIP, DZ_CHIP_SEL, DZ_PILL, DZ_HINT, DZ_HINTKEY,
               DZ_LABEL, DZ_QUERY, DZ_KEY, DZ_KBTN, DZ_KHINT, DZ_KCHIP, DZ_BADGE,
               DZ_HKEYW, DZ_SEARCH, DZ_TOAST, DZ_DRAWER, DZ_CARD_FOC,
-              DZ_SET_LABEL, DZ_SET_LABEL_F, DZ_SET_VALUE, DZ_SET_HEAD, DZ_TILE, DZ_SHEET_T, DZ_SHEET_M, DZ_N };
+              DZ_SET_LABEL, DZ_SET_LABEL_F, DZ_SET_VALUE, DZ_SET_HEAD, DZ_TILE, DZ_SHEET_T, DZ_SHEET_M,
+              DZ_CHIP_VAL, DZ_CHAPTER,
+              DZ_PANEL_T, DZ_CM_NAME, DZ_CM_META, DZ_CM_TEXT, DZ_CM_REPLY, DZ_DESC_T, DZ_DESC, DZ_CH_NAME, DZ_N };
     std::unique_ptr<gfx::Font> dz_[DZ_N];
     std::unique_ptr<gfx::Texture> rail_tex_[6];
     void load_design_fonts();
@@ -837,6 +839,11 @@ private:
     void render_options_sheet(gfx::Renderer& rn);
     void render_list_sheet(gfx::Renderer& rn);
     void render_settings_page(gfx::Renderer& rn);
+    // ui_bos_player.cpp
+    void player_overlay(gfx::Renderer& rn, double pos, double dur, float alpha);
+    void player_volume(gfx::Renderer& rn, float alpha);
+    void design_side_panel(gfx::Renderer& rn, gfx::Rect& panel);   // comments / description
+    yt::SearchResult desc_item_;   // what the description panel shows (author, views, date)
     void follow_selected();   // X in the TV view: follow / unfollow the tile's channel
     using Hints = std::vector<std::pair<std::string, std::string>>;
     void design_hint_bar(gfx::Renderer& rn, const Hints& right, const Hints& left = {});

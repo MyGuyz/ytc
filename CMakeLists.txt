@@ -67,7 +67,7 @@ if(BUILD_UI)
   endif()
 
   if(SDL2_FOUND AND GL_OK)
-    add_library(ytgfx STATIC src/gfx.cpp src/ui.cpp src/ui_bos.cpp src/ui_bos_menu.cpp src/player.cpp src/stream.cpp src/remux.cpp src/i18n.cpp src/text_thai.c)
+    add_library(ytgfx STATIC src/gfx.cpp src/ui.cpp src/ui_bos.cpp src/ui_bos_menu.cpp src/ui_bos_player.cpp src/player.cpp src/stream.cpp src/remux.cpp src/i18n.cpp src/text_thai.c)
     target_include_directories(ytgfx PUBLIC ${SDL2_INCLUDE_DIRS} ${GL_INCS})
     target_link_libraries(ytgfx PUBLIC ytcore ${SDL2_LIBRARIES} ${GL_LIBS} Threads::Threads)
     # pkg-config libs (SDL2/GLES) live in a prefix that isn't a default linker path on
