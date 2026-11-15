@@ -807,7 +807,8 @@ private:
     // Brick OS DESIGN.md: its fonts (Inter + the Thai font at em px, 768-high screen) and pieces
     enum DZ { DZ_STATUS, DZ_PCT, DZ_ROW, DZ_CARD, DZ_META, DZ_CHIP, DZ_CHIP_SEL, DZ_PILL, DZ_HINT, DZ_HINTKEY,
               DZ_LABEL, DZ_QUERY, DZ_KEY, DZ_KBTN, DZ_KHINT, DZ_KCHIP, DZ_BADGE,
-              DZ_HKEYW, DZ_SEARCH, DZ_TOAST, DZ_DRAWER, DZ_CARD_FOC, DZ_N };
+              DZ_HKEYW, DZ_SEARCH, DZ_TOAST, DZ_DRAWER, DZ_CARD_FOC,
+              DZ_SET_LABEL, DZ_SET_LABEL_F, DZ_SET_VALUE, DZ_SET_HEAD, DZ_TILE, DZ_SHEET_T, DZ_SHEET_M, DZ_N };
     std::unique_ptr<gfx::Font> dz_[DZ_N];
     std::unique_ptr<gfx::Texture> rail_tex_[6];
     void load_design_fonts();
@@ -829,6 +830,13 @@ private:
     void design_drawer(gfx::Renderer& rn, const std::vector<std::pair<const char*, std::string>>& rows, int sel,
                        int current);
     void render_main_drawer(gfx::Renderer& rn);
+    // ui_bos_menu.cpp: the menus drawn the Brick OS way
+    int settings_cat() const;
+    bool settings_page() const;
+    void design_menu_row(gfx::Renderer& rn, const MenuItem& it, gfx::Rect r, bool foc, bool sep);
+    void render_options_sheet(gfx::Renderer& rn);
+    void render_list_sheet(gfx::Renderer& rn);
+    void render_settings_page(gfx::Renderer& rn);
     void follow_selected();   // X in the TV view: follow / unfollow the tile's channel
     using Hints = std::vector<std::pair<std::string, std::string>>;
     void design_hint_bar(gfx::Renderer& rn, const Hints& right, const Hints& left = {});

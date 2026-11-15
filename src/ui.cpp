@@ -3506,14 +3506,30 @@ void App::input(Action a) {
     if (menu_open_) {
         int n = (int)menu_items_.size();
         switch (a) {
-            case Action::Up:     if (menu_sel_ > 0) menu_sel_--; break;
-            case Action::Down:   if (menu_sel_ + 1 < n) menu_sel_++; break;
+            // the options sheet is two columns of tiles (DESIGN 7.5): Up/Down by a row, Left/Right by a column
+            case Action::Up:
+                if (menu_kind_ == MenuKind::Context) { if (menu_sel_ >= 2) menu_sel_ -= 2; }
+                else if (menu_sel_ > 0) menu_sel_--;
+                break;
+            case Action::Down:
+                if (menu_kind_ == MenuKind::Context) {
+                    if (menu_sel_ + 2 < n) menu_sel_ += 2;
+                    else if ((menu_sel_ / 2 + 1) * 2 < n) menu_sel_ = n - 1;   // the last row's one tile
+                } else if (menu_sel_ + 1 < n) menu_sel_++;
+                break;
             case Action::Left:
             case Action::Right: {
                 if (menu_sel_ >= n) break;
                 MenuAction act = menu_items_[menu_sel_].action;
-                if (is_value_action(act))
-                    adjust_setting(act, a == Action::Right ? +1 : -1);
+                if (is_value_action(act)) { adjust_setting(act, a == Action::Right ? +1 : -1); break; }
+                if (menu_kind_ == MenuKind::Context) {
+                    if (a == Action::Right && menu_sel_ % 2 == 0 && menu_sel_ + 1 < n) menu_sel_++;
+                    else if (a == Action::Left && menu_sel_ % 2 == 1) menu_sel_--;
+                } else if (menu_kind_ == MenuKind::Settings) {   // Settings' columns: Right opens the page
+                    if (a == Action::Right && is_submenu_action(act)) menu_activate();
+                } else if (settings_cat() >= 0 && a == Action::Left) {   // Left goes back to the categories
+                    input(Action::Back);
+                }
                 break;
             }
             case Action::Select:
@@ -3540,7 +3556,9 @@ void App::input(Action a) {
                     break;
                 }
                 if (settings_kind(menu_kind_) && menu_kind_ != MenuKind::Settings) {
+                    int cat = settings_cat();
                     open_settings();                              // submenu -> Settings
+                    if (cat >= 0) menu_sel_ = cat;                // on the category it came from
                     break;
                 }
                 if (menu_kind_ == MenuKind::Settings) {   // Settings -> back to main menu
@@ -3997,118 +4015,7 @@ bool App::is_submenu_action(MenuAction a) {
     }
 }
 
-void App::render_menu(gfx::Renderer& rn) {
-    if (menu_kind_ == MenuKind::Main) { render_main_drawer(rn); return; }
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    rn.quad({0, 0, (float)W, (float)H}, theme_.bg.with_a(0.72f));
-    int n = (int)menu_items_.size();
-    // Settings rows carry a "Label:  Value" so they need more room than the
-    // context menu; widen that panel to keep values from crowding the edge.
-    float iw = std::min((settings_kind(menu_kind_) ||
-                         menu_kind_ == MenuKind::FeedManage ||
-                         menu_kind_ == MenuKind::PlayerPlayback ||
-                         menu_kind_ == MenuKind::SearchFilters ? 620.f : 560.f)*s, W*0.86f);
-    float ih = 58*s, gap = 8*s;
-    float title_h = 56*s, foot_h = 34*s;                 // reserve the footer inside the panel
-    // Clamp to the screen and scroll the item list when it's too tall to fit.
-    float margin = 22*s;
-    float items_budget = (float)H - 2*margin - 48*s - title_h - foot_h;
-    int max_vis = std::max(1, (int)(items_budget / (ih + gap)));
-    int vis = std::min(n, max_vis);
-    int first = 0;
-    if (n > vis) {                                        // keep the selection in view
-        first = menu_sel_ - vis / 2;
-        if (first < 0) first = 0;
-        if (first > n - vis) first = n - vis;
-    }
-    float ph = title_h + vis*(ih+gap) + foot_h;
-    float px = (W-iw)/2, py = (H-ph)/2;
-    rn.round_rect({px-24*s, py-24*s, iw+48*s, ph+48*s}, 24*s, theme_.panel);
-    std::string heading = (menu_kind_ == MenuKind::Main) ? std::string("YTC")
-                        : (menu_kind_ == MenuKind::Settings) ? std::string(i18n::tr(i18n::Str::Settings))
-                        : (menu_kind_ == MenuKind::SettingsAudio)
-                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetAudioMenu)
-                        : (menu_kind_ == MenuKind::SettingsVideo)
-                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetVideoMenu)
-                        : (menu_kind_ == MenuKind::SettingsCaptions)
-                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetCaptionsMenu)
-                        : (menu_kind_ == MenuKind::SettingsPlayback)
-                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetPlaybackMenu)
-                        : (menu_kind_ == MenuKind::SettingsBrowsing)
-                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetBrowsingMenu)
-                        : (menu_kind_ == MenuKind::SettingsHomeFeed)
-                          ? (std::string(i18n::tr(i18n::Str::Settings)) + " \xE2\x80\xA3 ") + i18n::tr(i18n::Str::SetHomeFeed)
-                        : (menu_kind_ == MenuKind::PlayerPlayback)
-                          ? std::string(i18n::tr(i18n::Str::SetPlaybackMenu))
-                        : (menu_kind_ == MenuKind::FeedManage)
-                          ? std::string(i18n::tr(i18n::Str::SetCustomFeed))
-                        : (menu_kind_ == MenuKind::FeedRemoveConfirm)
-                          ? std::string(i18n::tr(i18n::Str::FeedRemoveConfirm))
-                        : (menu_kind_ == MenuKind::SearchFilters) ? i18n::tr(i18n::Str::MenuSearchFilters)
-                          : font_body_->ellipsize(menu_target_.title, iw - 4*s);
-    rn.text(*font_body_, heading, px, py, theme_.text_dim);
-    // Scroll hints (more items above/below the window).
-    if (first > 0) rn.text(*font_small_, "▲", px + iw - 18*s, py, theme_.text_dim);
-    if (first + vis < n) rn.text(*font_small_, "▼", px + iw - 18*s,
-                                 py + title_h + vis*(ih+gap) - 20*s, theme_.text_dim);
-    float iy = py + title_h;
-    for (int k = 0; k < vis; ++k) {
-        int i = first + k;
-        bool sel = (i == menu_sel_);
-        rn.round_rect({px, iy, iw, ih}, 12*s, sel ? theme_.card_sel : theme_.card);
-        {
-            const std::string& lbl = menu_items_[i].label;
-            float ty = iy + (ih-font_body_->line_height())/2 + 3*s;
-            gfx::Color tc = sel ? theme_.text : theme_.text_dim;
-            size_t sep = is_value_action(menu_items_[i].action) ? lbl.find(":  ") : std::string::npos;
-            if (sep == std::string::npos) {
-                rn.text(*font_body_, font_body_->ellipsize(lbl, iw - 36*s), px + 18*s, ty, tc);
-            } else {
-                // Value row: label left, "‹ value ›" right-aligned. The chevrons say
-                // "Left/Right cycles this" per row — the footer only says it in
-                // general, and submenu rows already carry their own › marker.
-                std::string label = lbl.substr(0, sep);
-                std::string value = lbl.substr(sep + 3);
-                const char* lch = "\xE2\x80\xB9";   // ‹ U+2039
-                const char* rch = "\xE2\x80\xBA";   // › U+203A
-                float lw = font_body_->text_width(label);
-                float chw = font_body_->text_width(lch);
-                float right = px + iw - 18*s;
-                float avail = right - (px + 18*s + lw + 24*s) - 2*(chw + 8*s);
-                if (avail < 40*s) avail = 40*s;
-                value = font_body_->ellipsize(value, avail);
-                float vw = font_body_->text_width(value);
-                rn.text(*font_body_, label, px + 18*s, ty, tc);
-                rn.text(*font_body_, rch, right - chw, ty, theme_.text_dim);
-                rn.text(*font_body_, value, right - chw - 8*s - vw, ty, tc);
-                rn.text(*font_body_, lch, right - chw - 8*s - vw - 8*s - chw, ty, theme_.text_dim);
-            }
-        }
-        // Submenu rows get a trailing chevron: on a gamepad UI there's no hover to
-        // tell "A opens a page" from "A does the thing", and value rows already
-        // read differently ("Label:  Value").
-        if (is_submenu_action(menu_items_[i].action)) {
-            const char* chev = "\xE2\x80\xBA";   // U+203A ›
-            rn.text(*font_body_, chev,
-                    px + iw - 18*s - font_body_->text_width(chev),
-                    iy + (ih-font_body_->line_height())/2 + 3*s,
-                    sel ? theme_.text : theme_.text_dim);
-        }
-        iy += ih + gap;
-    }
-    bool has_value = false;
-    for (auto& it : menu_items_) if (is_value_action(it.action)) has_value = true;
-    const char* foot = (menu_kind_ == MenuKind::FeedManage) ? i18n::tr(i18n::Str::FooterManage)
-                     : (menu_kind_ == MenuKind::FeedRemoveConfirm) ? i18n::tr(i18n::Str::FooterMenuPlain)
-                     : (settings_kind(menu_kind_) || menu_kind_ == MenuKind::SearchFilters)
-                     ? i18n::tr(i18n::Str::FooterDesc)
-                     : has_value ? i18n::tr(i18n::Str::FooterMenuValue)
-                     : i18n::tr(i18n::Str::FooterMenuPlain);
-    rn.text(*font_small_, foot, px, iy + 10*s, theme_.text_dim);
-    rn.end();
-}
+// render_menu: ui_bos_menu.cpp
 
 void App::render_cast_picker(gfx::Renderer& rn) {
     const int W = win_->width(), H = win_->height();
@@ -5406,7 +5313,9 @@ void App::load_design_fonts() {
         {DZ_HINT, "Regular", 30}, {DZ_HINTKEY, "Bold", 24}, {DZ_LABEL, "Regular", 21}, {DZ_QUERY, "Medium", 32},
         {DZ_KEY, "Regular", 34}, {DZ_KBTN, "SemiBold", 22}, {DZ_KHINT, "Regular", 18}, {DZ_KCHIP, "Regular", 20},
         {DZ_BADGE, "SemiBold", 20}, {DZ_HKEYW, "Bold", 22}, {DZ_SEARCH, "Regular", 24}, {DZ_TOAST, "Medium", 26},
-        {DZ_DRAWER, "SemiBold", 30}, {DZ_CARD_FOC, "Bold", 22}};
+        {DZ_DRAWER, "SemiBold", 30}, {DZ_CARD_FOC, "Bold", 22}, {DZ_SET_LABEL, "Medium", 40},
+        {DZ_SET_LABEL_F, "SemiBold", 40}, {DZ_SET_VALUE, "Regular", 30}, {DZ_SET_HEAD, "Bold", 56},
+        {DZ_TILE, "SemiBold", 28}, {DZ_SHEET_T, "Bold", 34}, {DZ_SHEET_M, "Regular", 24}};
     for (auto& sp : spec)
         dz_[sp.id] = gfx::Font::load(dir + "Inter-" + sp.w + ".ttf", -sp.px * u, cjk, thai);
     static const char* rail[6] = {"search", "home", "fav", "later", "history", "settings"};
