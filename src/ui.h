@@ -15,6 +15,7 @@
 #include <mutex>
 #include <atomic>
 #include <deque>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -805,14 +806,32 @@ private:
     void pump_suggestions();
     // Brick OS DESIGN.md: its fonts (Inter + the Thai font at em px, 768-high screen) and pieces
     enum DZ { DZ_STATUS, DZ_PCT, DZ_ROW, DZ_CARD, DZ_META, DZ_CHIP, DZ_CHIP_SEL, DZ_PILL, DZ_HINT, DZ_HINTKEY,
-              DZ_LABEL, DZ_QUERY, DZ_KEY, DZ_KBTN, DZ_KHINT, DZ_KCHIP, DZ_BADGE, DZ_N };
+              DZ_LABEL, DZ_QUERY, DZ_KEY, DZ_KBTN, DZ_KHINT, DZ_KCHIP, DZ_BADGE,
+              DZ_HKEYW, DZ_SEARCH, DZ_TOAST, DZ_DRAWER, DZ_CARD_FOC, DZ_N };
     std::unique_ptr<gfx::Font> dz_[DZ_N];
     std::unique_ptr<gfx::Texture> rail_tex_[6];
     void load_design_fonts();
     const gfx::Font& dz(int i) const { return dz_[i] ? *dz_[i] : *font_body_; }
-    void design_status_bar(gfx::Renderer& rn);
+    void design_status_bar(gfx::Renderer& rn, const std::string& title = "YouTube");
+    // Brick OS look (ui_bos.cpp): the OS's ธีมสี and แถบสถานะ, its icons, toast, focus ring, drawer
+    struct BosLook {
+        gfx::Color focus = gfx::Color::rgb(0xF2F2F7), onfocus = gfx::Color::rgb(0x0B0B0D);
+        gfx::Color primary = gfx::Color::rgb(0x4A9BFF), onprimary = gfx::Color::rgb(0xFFFFFF);
+        gfx::Color hint = gfx::Color::rgb(0xF2F2F7), onhint = gfx::Color::rgb(0x0B0B0D);
+        int bar_bits = 63; bool clock24 = true;
+    } bos_;
+    unsigned bos_read_ms_ = 0;
+    void bos_refresh();
+    std::map<std::string, std::unique_ptr<gfx::Texture>> bos_icons_;
+    void bos_icon(gfx::Renderer& rn, const char* name, float x, float y, float size, gfx::Color c);
+    void design_toast(gfx::Renderer& rn);
+    void design_ring(gfx::Renderer& rn, const gfx::Rect& r, float radius);
+    void design_drawer(gfx::Renderer& rn, const std::vector<std::pair<const char*, std::string>>& rows, int sel,
+                       int current);
+    void render_main_drawer(gfx::Renderer& rn);
     void follow_selected();   // X in the TV view: follow / unfollow the tile's channel
-    void design_hint_bar(gfx::Renderer& rn, const std::vector<std::pair<std::string, std::string>>& hints);
+    using Hints = std::vector<std::pair<std::string, std::string>>;
+    void design_hint_bar(gfx::Renderer& rn, const Hints& right, const Hints& left = {});
     void kb_clamp();
 
     // Async resolve (Select -> background thread -> play on the GL thread).

@@ -69,6 +69,7 @@ const char* kKeys[(int)Str::COUNT] = {
     "DateToday","DateWeek","DateMonth","DateYear",
     "FilterRelevance","FilterPopularity","FooterSearchEmpty",
     "SearchYouTube","KbSpace","KbDelete","HintPlay","HintFollow","HintTypeSearch","HintTabs",
+    "HintBack","HintOptions","HintOpen","HintClose","HintSelect","HintMenu","HintChange","HintHide","HintExit","HintComments","HintChapters","HintType","HintDelete","HintSpace","HintSearch","HintOk","HintPlayPause","HintReplies","SettingsTitle","ChapterLabel","Subscribed","Subscribe","OptQuality","OptSpeed","HintLang","HintShift",
 };
 
 // English is baked in — the source strings AND the ultimate fallback, so the UI is
@@ -153,6 +154,7 @@ const char* kEnglish[(int)Str::COUNT] = {
     "Relevance","Popularity",
     "Select: filters    Y: search    Start: menu    B: back",
     "Search YouTube","space","delete","Play","Follow channel","Type to search","Switch tabs",
+    "Back","Options","Open","Close","Select","Menu","Change","Hide","Exit","Comments","Chapters","Type","Delete","Space","Search","OK","Play/Pause","Replies","YouTube settings","Chapter: ","Subscribed","Subscribe","Quality","Speed","\u0e01/A","Shift",
 };
 
 struct Lang {

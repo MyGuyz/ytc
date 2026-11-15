@@ -3998,6 +3998,7 @@ bool App::is_submenu_action(MenuAction a) {
 }
 
 void App::render_menu(gfx::Renderer& rn) {
+    if (menu_kind_ == MenuKind::Main) { render_main_drawer(rn); return; }
     const int W = win_->width(), H = win_->height();
     float s = H / 720.f;
     rn.begin(W, H);
@@ -4461,6 +4462,7 @@ static int shelf_kind(const yt::SearchResult& v) {
     return v.is_channel() ? 2 : v.is_playlist() ? 3 : v.is_post() ? 4 : v.is_short ? 1 : 0;
 }
 static constexpr int kRailItems = 6;   // Search, Home, Favorites, Watch later, History, Settings
+static constexpr int kDrawerItems = 8; // + Favourite playlists, Downloads (DESIGN 7.5 drawer)
 
 void App::rebuild_shelves() {
     using S = i18n::Str;
@@ -4494,6 +4496,8 @@ int App::rail_page() const {
     if (view_label_ == "Favorite Channels") return 2;
     if (view_label_ == "Watch Later") return 3;
     if (view_label_ == "History") return 4;
+    if (view_label_ == "Favorite Playlists") return 6;
+    if (view_label_ == "Downloads") return 7;
     return query_.empty() ? 1 : 0;
 }
 
@@ -4505,6 +4509,8 @@ void App::rail_activate() {
     if      (rail_sel_ == 1) load_home();
     else if (rail_sel_ == 2) load_favorites();
     else if (rail_sel_ == 3) load_watch_later();
+    else if (rail_sel_ == 6) load_favorite_playlists();
+    else if (rail_sel_ == 7) load_downloads();
     else                     load_history();
 }
 
@@ -4513,7 +4519,7 @@ void App::shelves_input(Action a) {
     if (rail_focus_) {
         switch (a) {
             case Action::Up:     if (rail_sel_ > 0) rail_sel_--; break;
-            case Action::Down:   if (rail_sel_ < kRailItems - 1) rail_sel_++; break;
+            case Action::Down:   if (rail_sel_ < kDrawerItems - 1) rail_sel_++; break;
             case Action::Right:  if (!shelves_.empty()) rail_focus_ = false; break;
             case Action::Select: rail_activate(); break;
             default: break;
@@ -4598,21 +4604,22 @@ static int length_seconds(const std::string& s) {   // "1:02:03" / "8:24" -> sec
 }
 
 void App::render_shelves(gfx::Renderer& rn) {
-    // DESIGN.md 6.4: status bar, the icon rail, search pill + tab chips, rows of cards, the hint bar
+    // brick-os DESIGN.md 7.5 (v2-YouTube): status bar, the icon rail, search pill + tab chips, rows of cards, hint bar
     using S = i18n::Str;
     const int W = win_->width(), H = win_->height();
     const float u = H / 768.f;
+    bos_refresh();
     rn.begin(W, H);
     rn.clear(dzc::bg);
     if (shelves_src_n_ != results_.size()) rebuild_shelves();
 
-    const float bar = 56*u, rail_w = 96*u, cx0 = rail_w + 16*u, top_y = bar + 12*u, pill_h = 48*u;
+    const float bar = 64*u, cx0 = 112*u, top_y = bar + 4*u, pill_h = 48*u;
     const float rows_top = top_y + pill_h, hint_top = H - 64*u;
-    const float cardw = 300*u, gap = 20*u, thumbh = 169*u, rad = 18*u;
-    const gfx::Font &rf = dz(DZ_ROW), &cf = dz(DZ_CARD), &mf = dz(DZ_META);
-    const float head = 22*u + rf.line_height() + 12*u;
+    const float cardw = 300*u, gap = 22*u, thumbh = 169*u, rad = 18*u;
+    const gfx::Font &rf = dz(DZ_ROW), &cf = dz(DZ_CARD), &cff = dz(DZ_CARD_FOC), &mf = dz(DZ_META);
+    const float head = 16*u + rf.line_height() + 14*u;
     auto row_h = [&](const Shelf& sh) {
-        return (sh.title.empty() ? 12*u : head) + thumbh + 8*u + cf.line_height() + 8*u + mf.line_height();
+        return (sh.title.empty() ? 16*u : head) + thumbh + 12*u + cf.line_height() + 2*u + mf.line_height();
     };
 
     int fr = 0, fc = 0;
@@ -4635,8 +4642,8 @@ void App::render_shelves(gfx::Renderer& rn) {
         shelf_off_[r] += (tx - shelf_off_[r]) * 0.3f;
         if (std::abs(tx - shelf_off_[r]) < 0.5f) shelf_off_[r] = tx;
         if (y + rh < rows_top - 40*u) { y += rh; continue; }
-        float ty = y + (sh.title.empty() ? 12*u : head);
-        if (!sh.title.empty()) rn.text(rf, sh.title, cx0, y + 22*u, dzc::text);
+        float ty = y + (sh.title.empty() ? 16*u : head);
+        if (!sh.title.empty()) rn.text(rf, sh.title, cx0, y + 16*u, dzc::white);
         for (int c = 0; c < n; ++c) {
             float x = cx0 + c * (cardw + gap) - shelf_off_[r];
             int i = sh.idx[c];
@@ -4647,66 +4654,73 @@ void App::render_shelves(gfx::Renderer& rn) {
                                        if (!av.empty()) thumbs_.request(av); }
             if (x + cardw < 0 || x > W) continue;
             bool foc = have && !rail_focus_ && r == fr && c == fc;
-            gfx::Rect tr{x, ty, cardw, thumbh};
-            if (foc) {   // 5px accent ring at offset 4
-                rn.round_rect({x - 9*u, ty - 9*u, cardw + 18*u, thumbh + 18*u}, rad + 9*u, dzc::accent);
-                rn.round_rect({x - 4*u, ty - 4*u, cardw + 8*u, thumbh + 8*u}, rad + 4*u, dzc::bg);
-            }
-            rn.quad(tr, dzc::s1);
+            // the focused card x1.04 with the ring (4 px, focus colour) outside a 4 px gap
+            gfx::Rect tr = foc ? gfx::Rect{x - cardw * 0.02f, ty - thumbh * 0.02f, cardw * 1.04f, thumbh * 1.04f}
+                               : gfx::Rect{x, ty, cardw, thumbh};
+            if (foc) design_ring(rn, tr, rad);
+            rn.quad(tr, gfx::Color::rgb(0x1C1C1F));
             gfx::Color tint{1, 1, 1, 1};
             std::string url = v.thumbnail_url;
             if (url.empty() && v.is_channel()) url = chan_meta_.avatar(v.channel_id);
             if (auto* tex = url.empty() ? nullptr : thumbs_.get(url)) {
-                if (v.is_channel()) { float av = thumbh * 0.82f;
-                    rn.textured_cover({x + (cardw - av) / 2, ty + (thumbh - av) / 2, av, av}, *tex, tint); }
+                if (v.is_channel()) { float av = tr.h * 0.82f;
+                    rn.textured_cover({tr.x + (tr.w - av) / 2, tr.y + (tr.h - av) / 2, av, av}, *tex, tint); }
                 else rn.textured_cover(tr, *tex, tint);
             } else if (v.is_post()) {
-                rn.text(mf, mf.ellipsize(v.title.substr(0, v.title.find('\n')), cardw - 24*u), x + 12*u, ty + 12*u, dzc::text2);
+                rn.text(mf, mf.ellipsize(v.title.substr(0, v.title.find('\n')), tr.w - 24*u), tr.x + 12*u, tr.y + 12*u,
+                        gfx::Color::rgb(0xB4B4BA));
             }
-            // watched bar: 5 high, #FF453A, along the bottom by the saved position
+            // watched: a 5 high track (white 25 %) along the bottom, red (youtube) as far as the saved position
             int len = length_seconds(v.length_text);
             if (len > 0 && !v.video_id.empty()) {
                 double pos = it_.resume_pos(v.video_id);
-                if (pos > 0) rn.quad({x, ty + thumbh - 5*u, (float)(cardw * std::min(1.0, pos / len)), 5*u}, dzc::red);
+                if (pos > 0) {
+                    rn.quad({tr.x, tr.y + tr.h - 5*u, tr.w, 5*u}, dzc::white.with_a(0.25f));
+                    rn.quad({tr.x, tr.y + tr.h - 5*u, (float)(tr.w * std::min(1.0, pos / len)), 5*u},
+                            gfx::Color::rgb(0xFF0033));
+                }
             }
             std::string pill = v.is_short ? std::string() : v.is_playlist() ? v.view_count_text : v.length_text;
-            if (!pill.empty()) {   // duration: 15/600, black, radius 8, padding 3 8, 10 from the right, 12 from the bottom
+            if (!pill.empty()) {   // duration: 18/600 on black 80 %, radius 8, padding 2 8, 10 from the corner
                 const gfx::Font& pf = dz(DZ_PILL);
-                float pw = pf.text_width(pill) + 16*u, ph = pf.line_height() + 6*u;
-                gfx::Rect pr{x + cardw - 10*u - pw, ty + thumbh - 12*u - ph, pw, ph};
-                rn.round_rect(pr, 8*u, dzc::bg);
-                rn.text(pf, pill, pr.x + 8*u, pr.y + 3*u, dzc::text);
+                float pw = pf.text_width(pill) + 16*u, ph = pf.line_height() + 4*u;
+                gfx::Rect pr{tr.x + tr.w - 10*u - pw, tr.y + tr.h - 10*u - ph, pw, ph};
+                rn.round_rect(pr, 8*u, dzc::bg.with_a(0.8f));
+                rn.text(pf, pill, pr.x + 8*u, pr.y + 2*u, dzc::white);
             }
             rn.round_corners(tr, rad, dzc::bg);
             std::string title = v.is_post() ? v.title.substr(0, v.title.find('\n')) : v.title;
-            rn.text(cf, cf.ellipsize(title, cardw), x, ty + thumbh + 8*u, dzc::text);
+            const gfx::Font& tf = foc ? cff : cf;
+            float ly = ty + thumbh + 12*u;
+            rn.text(tf, tf.ellipsize(title, cardw), x, ly, dzc::white);
             std::string meta;
             auto add = [&](const std::string& p) { if (!p.empty()) meta += (meta.empty() ? "" : " \xC2\xB7 ") + p; };
             if (v.is_channel()) add(v.subs_text);
             else { add(v.author); add(v.view_count_text); add(v.published_text); }
-            rn.text(mf, mf.ellipsize(meta, cardw), x, ty + thumbh + 8*u + cf.line_height() + 8*u, dzc::text2);
+            rn.text(mf, mf.ellipsize(meta, cardw), x, ly + cf.line_height() + 2*u, gfx::Color::rgb(0xB4B4BA));
         }
         y += rh;
     }
 
-    // top bar over what scrolls under it: search pill 260x48, the tab chips, the quality badge
+    // top: the status bar, then the search pill 220x48, the tab chips 48, the quality badge
     rn.quad({0, 0, (float)W, rows_top}, dzc::bg);
     design_status_bar(rn);
-    rn.round_rect({cx0, top_y, 260*u, pill_h}, 24*u, dzc::s1);
-    if (rail_tex_[0]) rn.textured({cx0 + 18*u, top_y + (pill_h - 22*u) / 2, 22*u, 22*u}, *rail_tex_[0], dzc::text2);
+    const gfx::Color surf = gfx::Color::rgb(0x1C1C1F), text2 = gfx::Color::rgb(0xB4B4BA);
+    rn.round_rect({cx0, top_y, 220*u, pill_h}, 24*u, surf);
+    bos_icon(rn, "search", cx0 + 18*u, top_y + (pill_h - 24*u) / 2, 24*u, text2);
     std::string q = (!query_.empty() && !in_channel_view_) ? query_ : std::string(i18n::tr(S::Search));
-    rn.text(dz(DZ_HINT), dz(DZ_HINT).ellipsize(q, 260*u - 70*u), cx0 + 52*u,
-            top_y + (pill_h - dz(DZ_HINT).line_height()) / 2, dzc::text2);
-    float chip_x = cx0 + 260*u + 12*u, right = W - 32*u;
-    {   // quality badge: 16, #A1A1A6, 1px #3A3A3C, radius 10, padding 5 10
+    const gfx::Font& sf = dz(DZ_SEARCH);
+    rn.text(sf, sf.ellipsize(q, 220*u - 70*u), cx0 + 52*u, top_y + (pill_h - sf.line_height()) / 2, text2);
+    float chip_x = cx0 + 220*u + 12*u, right = W - 32*u;
+    {   // quality badge: 20/600 text2, 1px #38383A, radius 10, padding 4 10
         int mh = effective_max_height();
         std::string qb = mh > 0 ? std::to_string(mh) + "p" : std::string("Auto");
         const gfx::Font& bf = dz(DZ_BADGE);
-        float bw = bf.text_width(qb) + 20*u, bh = bf.line_height() + 10*u;
+        float bw = bf.text_width(qb) + 20*u, bh = bf.line_height() + 8*u;
         gfx::Rect br{right - bw, top_y + (pill_h - bh) / 2, bw, bh};
-        rn.round_rect(br, 10*u, dzc::s3);
+        rn.round_rect(br, 10*u, gfx::Color::rgb(0x38383A));
         rn.round_rect({br.x + u, br.y + u, br.w - 2*u, br.h - 2*u}, 9*u, dzc::bg);
-        rn.text(bf, qb, br.x + 10*u, br.y + 5*u, dzc::text2);
+        rn.text(bf, qb, br.x + 10*u, br.y + 4*u, text2);
         right = br.x - 12*u;
     }
     if (channel_tabs_active() || home_tabs_active() || search_tabs_active()) {
@@ -4714,49 +4728,81 @@ void App::render_shelves(gfx::Renderer& rn) {
         const S kTabs[]       = {S::TabAll, S::TabVideos, S::TabShorts, S::TabPosts, S::TabPlaylists};
         const S kSearchTabs[] = {S::TabAll, S::TabVideos, S::TabShorts, S::FilterChannels, S::TabPlaylists};
         const S* tabs = search_tabs_active() ? kSearchTabs : kTabs;
-        float ch = 44*u, cy = top_y + (pill_h - ch) / 2;
+        float ch = 48*u, cy = top_y, words = 0;
+        for (int i = 0; i < 5; ++i) words += dz(i == active ? DZ_CHIP_SEL : DZ_CHIP).text_width(i18n::tr(tabs[i]));
+        // padding 22 as drawn; less when the five do not fit, down to 12
+        float padx = std::max(12*u, std::min(22*u, (right - chip_x - words - 4 * 10*u) / 10));
         for (int i = 0; i < 5; ++i) {
             bool st = i == active;
             const gfx::Font& f = dz(st ? DZ_CHIP_SEL : DZ_CHIP);
             const char* label = i18n::tr(tabs[i]);
-            float cw = f.text_width(label) + 40*u;
+            float cw = f.text_width(label) + 2 * padx;
             if (chip_x + cw > right) break;
-            rn.round_rect({chip_x, cy, cw, ch}, 22*u, st ? dzc::text : dzc::s1);
-            rn.text(f, label, chip_x + 20*u, cy + (ch - f.line_height()) / 2, st ? dzc::bg : dzc::text3);
-            chip_x += cw + 12*u;
+            rn.round_rect({chip_x, cy, cw, ch}, 24*u, st ? dzc::white : surf);
+            rn.text(f, label, chip_x + padx, cy + (ch - f.line_height()) / 2, st ? dzc::bg : text2);
+            chip_x += cw + 10*u;
         }
     } else {
         std::string page = in_channel_view_ ? query_ : tr_view_label(view_label_);
         if (refresh_running_) page = i18n::tr(S::Loading);
-        rn.text(rf, rf.ellipsize(page, right - chip_x), chip_x, top_y + (pill_h - rf.line_height()) / 2, dzc::text);
+        rn.text(rf, rf.ellipsize(page, right - chip_x), chip_x, top_y + (pill_h - rf.line_height()) / 2, dzc::white);
     }
 
-    // the rail: 56x56 circles, 30px icons, from 92 under the status bar, gap 14; the current page on #2C2C2E.
-    // Focused (not in the mockup) it widens over the dimmed rows with the labels, as before.
-    static const S kLabels[kRailItems] = {S::Search, S::Home, S::FavoriteChannels, S::WatchLater, S::History, S::Settings};
-    float rw = rail_w;
-    if (rail_focus_) {
-        rn.quad({0, bar, (float)W, hint_top - bar}, dzc::bg.with_a(0.6f));
-        for (auto l : kLabels) rw = std::max(rw, 92*u + dz(DZ_HINT).text_width(i18n::tr(l)) + 28*u);
-        rn.quad({0, bar, rw, hint_top - bar}, dzc::s1);
-    } else rn.quad({0, bar, cx0 - 4*u, hint_top - bar}, dzc::bg);   // tiles scrolled off to the left
+    // the rail: 96 wide, 56 circles from 28 under the status bar, gap 14, icons 30; the current page on surface2
+    rn.quad({0, bar, cx0 - 4*u, hint_top - bar}, dzc::bg);   // cards scrolled off to the left
+    static const char* kRailIcons[kRailItems] = {"search", "home", "heart", "clock", "history", "settings"};
     int page = rail_page();
     for (int k = 0; k < kRailItems; ++k) {
-        float cy = bar + 92*u + 28*u + k * 70*u, cx = rail_w / 2;
-        bool hot = rail_focus_ && k == rail_sel_;
-        if (hot) rn.round_rect({10*u, cy - 28*u, rw - 20*u, 56*u}, 28*u, dzc::accent);
-        else if (k == page) rn.round_rect({cx - 28*u, cy - 28*u, 56*u, 56*u}, 28*u, dzc::s2);
-        gfx::Color ic = hot ? dzc::white : (k == page ? dzc::text : dzc::text2);
-        if (rail_tex_[k]) rn.textured({cx - 15*u, cy - 15*u, 30*u, 30*u}, *rail_tex_[k], ic);
-        if (rail_focus_)
-            rn.text(dz(DZ_HINT), i18n::tr(kLabels[k]), 92*u, cy - dz(DZ_HINT).line_height() / 2, hot ? dzc::white : dzc::text);
+        float cy = bar + 28*u + 28*u + k * 70*u, cx = 48*u;
+        if (k == page) rn.round_rect({cx - 28*u, cy - 28*u, 56*u, 56*u}, 28*u, gfx::Color::rgb(0x2C2C30));
+        bos_icon(rn, kRailIcons[k], cx - 15*u, cy - 15*u, 30*u, k == page ? dzc::white : text2);
     }
 
-    design_hint_bar(rn, {{"A", i18n::tr(S::HintPlay)}, {"X", i18n::tr(S::HintFollow)},
-                         {"Y", i18n::tr(S::HintTypeSearch)}, {"L1 R1", i18n::tr(S::HintTabs)}});
-    draw_status_banner(rn, rows_top, H / 720.f);
+    if (rail_focus_) {   // the drawer (DESIGN 7.5): the rail's places and two more
+        design_hint_bar(rn, {{"A", i18n::tr(S::HintOpen)}, {"B", i18n::tr(S::HintClose)}},
+                        {{"START", i18n::tr(S::HintMenu)}});
+        design_drawer(rn, {{"search", i18n::tr(S::Search)}, {"home", i18n::tr(S::Home)},
+                           {"heart", i18n::tr(S::FavoriteChannels)}, {"clock", i18n::tr(S::WatchLater)},
+                           {"history", i18n::tr(S::History)}, {"settings", i18n::tr(S::Settings)},
+                           {"list", i18n::tr(S::FavoritePlaylists)}, {"download", i18n::tr(S::Downloads)}},
+                      rail_sel_, page);
+    } else {
+        design_hint_bar(rn, {{"A", i18n::tr(S::HintPlay)}, {"B", i18n::tr(S::HintBack)},
+                             {"X", i18n::tr(S::HintFollow)}, {"Y", i18n::tr(S::HintSearch)}},
+                        {{"SELECT", i18n::tr(S::HintOptions)}});
+    }
+    design_toast(rn);
     rn.end();
 }
+
+// START's menu (MenuKind::Main) as the drawer, over whatever page is showing
+void App::render_main_drawer(gfx::Renderer& rn) {
+    using S = i18n::Str;
+    const int W = win_->width(), H = win_->height();
+    rn.begin(W, H);
+    std::vector<std::pair<const char*, std::string>> rows;
+    for (auto& it : menu_items_) {
+        const char* ic = "list";
+        switch (it.action) {
+            case MenuAction::GoHome: ic = "home"; break;
+            case MenuAction::GoFavorites: ic = "heart"; break;
+            case MenuAction::GoFavoritePlaylists: ic = "list"; break;
+            case MenuAction::GoWatchLater: ic = "clock"; break;
+            case MenuAction::GoDownloads: ic = "download"; break;
+            case MenuAction::GoHistory: ic = "history"; break;
+            case MenuAction::GoSettings: ic = "settings"; break;
+            case MenuAction::Quit: ic = "power"; break;
+            default: break;
+        }
+        rows.push_back({ic, it.label});
+    }
+    design_status_bar(rn);
+    design_hint_bar(rn, {{"A", i18n::tr(S::HintOpen)}, {"B", i18n::tr(S::HintClose)}},
+                    {{"START", i18n::tr(S::HintMenu)}});
+    design_drawer(rn, rows, menu_sel_, -1);
+    rn.end();
+}
+
 
 void App::render_grid(gfx::Renderer& rn) {
     const int W = win_->width(), H = win_->height();
@@ -4873,17 +4919,8 @@ void App::render_grid(gfx::Renderer& rn) {
 // Transient status banner (resolve errors, "Added X to favorites", etc.). Width is
 // clamped to the screen and the message ellipsized, so a long channel name never
 // runs off both edges. Shared by every view's render.
-void App::draw_status_banner(gfx::Renderer& rn, float top_y, float s) {
-    if (status_msg_.empty() || SDL_GetTicks() >= status_until_) return;
-    const int W = win_->width();
-    std::string msg = font_body_->ellipsize(status_msg_, W - 96*s);
-    float tw = font_body_->text_width(msg);
-    float bw = tw + 48*s, bh = 52*s;
-    float bx = (W - bw)/2;
-    rn.quad({bx, top_y, bw, bh}, theme_.panel);
-    rn.quad({bx, top_y, 5*s, bh}, theme_.accent);
-    rn.text(*font_body_, msg, bx + 24*s, top_y + (bh-font_body_->line_height())/2 + 3*s,
-            theme_.text);
+void App::draw_status_banner(gfx::Renderer& rn, float, float) {   // DESIGN 5.9: the OS toast
+    design_toast(rn);
 }
 
 // Shared empty/loading centre text for the non-grid views. Returns true if it drew
@@ -5364,11 +5401,12 @@ void App::load_design_fonts() {
     if (!std::ifstream(thai).good()) thai.clear();
     const std::string cjk = cjk_font_path();
     struct { int id; const char* w; float px; } spec[] = {
-        {DZ_STATUS, "SemiBold", 21}, {DZ_PCT, "SemiBold", 19}, {DZ_ROW, "Bold", 28}, {DZ_CARD, "SemiBold", 20},
-        {DZ_META, "Regular", 16}, {DZ_CHIP, "Medium", 19}, {DZ_CHIP_SEL, "SemiBold", 19}, {DZ_PILL, "SemiBold", 15},
-        {DZ_HINT, "Regular", 19}, {DZ_HINTKEY, "Bold", 16}, {DZ_LABEL, "Regular", 21}, {DZ_QUERY, "Medium", 32},
+        {DZ_STATUS, "SemiBold", 30}, {DZ_PCT, "SemiBold", 30}, {DZ_ROW, "Bold", 30}, {DZ_CARD, "SemiBold", 22},
+        {DZ_META, "Regular", 18}, {DZ_CHIP, "Medium", 24}, {DZ_CHIP_SEL, "SemiBold", 24}, {DZ_PILL, "SemiBold", 18},
+        {DZ_HINT, "Regular", 30}, {DZ_HINTKEY, "Bold", 24}, {DZ_LABEL, "Regular", 21}, {DZ_QUERY, "Medium", 32},
         {DZ_KEY, "Regular", 34}, {DZ_KBTN, "SemiBold", 22}, {DZ_KHINT, "Regular", 18}, {DZ_KCHIP, "Regular", 20},
-        {DZ_BADGE, "Regular", 16}};
+        {DZ_BADGE, "SemiBold", 20}, {DZ_HKEYW, "Bold", 22}, {DZ_SEARCH, "Regular", 24}, {DZ_TOAST, "Medium", 26},
+        {DZ_DRAWER, "SemiBold", 30}, {DZ_CARD_FOC, "Bold", 22}};
     for (auto& sp : spec)
         dz_[sp.id] = gfx::Font::load(dir + "Inter-" + sp.w + ".ttf", -sp.px * u, cjk, thai);
     static const char* rail[6] = {"search", "home", "fav", "later", "history", "settings"};
@@ -5378,44 +5416,6 @@ void App::load_design_fonts() {
         std::ifstream f(idir + "rail_" + rail[k] + ".png", std::ios::binary);
         std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         if (!bytes.empty()) rail_tex_[k] = gfx::Texture::from_encoded(bytes.data(), bytes.size());
-    }
-}
-
-// DESIGN.md 5.1: time left (21/600), battery % right (19/600); 56 high
-void App::design_status_bar(gfx::Renderer& rn) {
-    const int W = win_->width(); const float u = win_->height() / 768.f;
-    const float h = 56*u;
-    char clock[16]; time_t now = time(nullptr); strftime(clock, sizeof clock, "%H:%M", localtime(&now));
-    rn.text(dz(DZ_STATUS), clock, 32*u, (h - dz(DZ_STATUS).line_height()) / 2, dzc::text);
-    static unsigned last = 0; static int pct = -1;
-    if (pct < 0 || SDL_GetTicks() - last > 30000) {
-        last = SDL_GetTicks(); pct = -1;
-        for (const char* p : {"/sys/class/power_supply/axp2202-battery/capacity", "/sys/class/power_supply/battery/capacity"}) {
-            std::ifstream f(p); int v; if (f >> v) { pct = v; break; }
-        }
-    }
-    if (pct >= 0) {
-        std::string s = std::to_string(pct) + "%";
-        rn.text(dz(DZ_PCT), s, W - 32*u - dz(DZ_PCT).text_width(s), (h - dz(DZ_PCT).line_height()) / 2, dzc::text);
-    }
-}
-
-// DESIGN.md 5.2: 64 high, 1px #1C1C1E top line, 32x32 #2C2C2E circles (wide buttons a pill), labels 19 #A1A1A6
-void App::design_hint_bar(gfx::Renderer& rn, const std::vector<std::pair<std::string, std::string>>& hints) {
-    const int W = win_->width(), H = win_->height(); const float u = H / 768.f;
-    const float top = H - 64*u, cy = top + 32*u;
-    rn.quad({0, top, (float)W, 64*u}, dzc::bg);
-    rn.quad({0, top, (float)W, std::max(1.f, u)}, dzc::s1);
-    float x = 40*u;
-    for (auto& h : hints) {
-        const gfx::Font& kf = dz(DZ_HINTKEY);
-        bool wide = h.first.size() > 1;
-        float bw = wide ? kf.text_width(h.first) + 24*u : 32*u;
-        rn.round_rect({x, cy - 16*u, bw, 32*u}, 16*u, dzc::s2);
-        rn.text(kf, h.first, x + (bw - kf.text_width(h.first)) / 2, cy - kf.line_height() / 2, dzc::text);
-        x += bw + 10*u;
-        rn.text(dz(DZ_HINT), h.second, x, cy - dz(DZ_HINT).line_height() / 2, dzc::text2);
-        x += dz(DZ_HINT).text_width(h.second) + 32*u;
     }
 }
 
