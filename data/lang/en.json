@@ -255,5 +255,9 @@
   "HintScroll": "Scroll",
   "HintSort": "Sort",
   "HintTab": "Tabs",
-  "Unfollow": "Unfollow"
+  "Unfollow": "Unfollow",
+  "HintRemove": "Remove",
+  "HintSeek": "Seek",
+  "HintVolume": "Volume",
+  "HintStopCast": "Stop casting"
 }

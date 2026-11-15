@@ -143,6 +143,7 @@ public:
     enum class ViewMode { Grid, Carousel, Carousel3D, Coverflow, Shelves };
     bool in_subview() const { return in_channel_view_; }   // channel/playlist view active?
     bool menu_open() const { return menu_open_; }
+    void set_held(bool h) { held_ = h; }
     bool wants_quit() const { return quit_requested_; }     // set by the menu's Exit item
     bool player_paused() const { return player_.paused(); } // for tests/telemetry
 
@@ -174,10 +175,6 @@ private:
     void render_carousel3d(gfx::Renderer& rn);   // spread 3D carousel
     void render_coverflow(gfx::Renderer& rn);    // traditional stacked coverflow
     // Shared per-tile drawing (grid/carousel/coverflow) — parity by construction.
-    void draw_thumb(gfx::Renderer& rn, const yt::SearchResult& v,
-                    const gfx::Rect& r, float s, float alpha);
-    void draw_meta(gfx::Renderer& rn, const yt::SearchResult& v, int idx,
-                   float x, float y, float maxw, float s, float alpha, bool center = false);
     // Precomputed metadata lines per result (composed + humanize_age done ONCE, not
     // every frame). Rebuilt when results_ changes; draw_meta ellipsizes on demand.
     struct TileLines { std::string l1, l2, l3; };
@@ -185,7 +182,6 @@ private:
     std::vector<int> vis_;   // reused scratch for carousel/coverflow visible indices
     void build_tile_lines();
     static TileLines compose_lines(const yt::SearchResult& v, ChannelMetaCache& cmeta);
-    void render_browse_chrome(gfx::Renderer& rn, float hy);  // header + tab strip (shared)
     bool browse_empty_overlay(gfx::Renderer& rn);            // centre empty/loading text
     void draw_status_banner(gfx::Renderer& rn, float top_y, float s); // transient msg, clamped
     void render_player(gfx::Renderer& rn);
@@ -847,6 +843,23 @@ private:
     void follow_selected();   // X in the TV view: follow / unfollow the tile's channel
     using Hints = std::vector<std::pair<std::string, std::string>>;
     void design_hint_bar(gfx::Renderer& rn, const Hints& right, const Hints& left = {});
+    // ui_bos_browse.cpp: the browse views and the small screens
+    float browse_rows_top() const;
+    std::string card_meta(const yt::SearchResult& v);
+    void design_thumb(gfx::Renderer& rn, const yt::SearchResult& v, const gfx::Rect& r, float rad, float alpha);
+    void design_card(gfx::Renderer& rn, int i, float x, float ty, float cardw, float thumbh, bool foc);
+    void design_browse_top(gfx::Renderer& rn, float cx0);
+    void design_browse_hints(gfx::Renderer& rn);
+    void design_center_meta(gfx::Renderer& rn, float y);
+    void strip_visible(float reach);
+    struct SheetRow { std::string label, value; bool danger; const char* icon; };
+    void design_sheet(gfx::Renderer& rn, const std::string& heading, const std::string& note,
+                      const std::vector<SheetRow>& rows, int sel, const Hints& right, const Hints& left = {});
+    // DESIGN 5.7 wrap: held_ is true while main_ui injects a held direction's repeats
+    bool held_ = false;
+    int wrap_step(int& sel, int n, int dir);
+    void grid_step(int& sel, int n, int cols, Action a);
+    bool kb_sym_ = false;      // the #+= symbols page
     void kb_clamp();
 
     // Async resolve (Select -> background thread -> play on the GL thread).

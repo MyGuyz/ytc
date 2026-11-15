@@ -72,6 +72,7 @@ const char* kKeys[(int)Str::COUNT] = {
     "HintBack","HintOptions","HintOpen","HintClose","HintSelect","HintMenu","HintChange","HintHide","HintExit","HintComments","HintChapters","HintType","HintDelete","HintSpace","HintSearch","HintOk","HintPlayPause","HintReplies","SettingsTitle","ChapterLabel","Subscribed","Subscribe","OptQuality","OptSpeed","HintLang","HintShift",
     "DescTitle","HintScroll","HintSort",
     "HintTab","Unfollow",
+    "HintRemove","HintSeek","HintVolume","HintStopCast",
 };
 
 // English is baked in — the source strings AND the ultimate fallback, so the UI is

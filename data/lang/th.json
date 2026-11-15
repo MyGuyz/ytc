@@ -255,5 +255,9 @@
   "HintScroll": "เลื่อน",
   "HintSort": "เรียง",
   "HintTab": "แท็บ",
-  "Unfollow": "เลิกติดตาม"
+  "Unfollow": "เลิกติดตาม",
+  "HintRemove": "นำออก",
+  "HintSeek": "เลื่อน",
+  "HintVolume": "เสียง",
+  "HintStopCast": "หยุดแคสต์"
 }

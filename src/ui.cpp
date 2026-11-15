@@ -95,7 +95,7 @@ const gfx::Color bg{0, 0, 0, 1}, s1{0x1C/255.f, 0x1C/255.f, 0x1E/255.f, 1}, s2{0
 
 // ---------- On-screen keyboard layout ----------
 namespace {
-enum KType { KCHAR, KSPACE, KDEL, KSUBMIT, KSHIFT, KLEFT, KRIGHT, KLANG };
+enum KType { KCHAR, KSPACE, KDEL, KSUBMIT, KSHIFT, KLEFT, KRIGHT, KLANG, KSYM };
 // text: what a KCHAR key types when it isn't the one ASCII ch (Brick OS: Thai keys, UTF-8)
 struct Key { const char* label; KType type; char ch; int span; const char* text = nullptr; };
 // Android-TV-style QWERTY, but keeping a dedicated number row on top. `span` widens a
@@ -112,9 +112,31 @@ const std::vector<std::vector<Key>> KB = {
      {"n",KCHAR,'n',1},{"m",KCHAR,'m',1},{",",KCHAR,',',1},
      {"\xE2\x8C\xAB",KDEL,0,1}},                                             // U+232B backspace
     {{"\xE2\x97\x80",KLEFT,0,1},{"\xE2\x96\xB6",KRIGHT,0,1},                  // U+25C0 / U+25B6
-     {"space",KSPACE,' ',4},{"-",KCHAR,'-',1},{"\xE0\xB8\x81/A",KLANG,0,1},   // Brick OS: ก/A
+     {"space",KSPACE,' ',4},{"#+=",KSYM,0,1},{"\xE0\xB8\x81/A",KLANG,0,1},   // Brick OS: ก/A
      {"Search",KSUBMIT,0,2}},
 };
+// Brick OS: the shifted English page and the symbols page (#+=), as in the system keyboard (DESIGN 7.6)
+#define TS(t) {t, KCHAR, 0, 1, t}
+#define KB_BOTTOM4 {{"\xE2\x97\x80",KLEFT,0,1},{"\xE2\x96\xB6",KRIGHT,0,1}, \
+     {"space",KSPACE,' ',4},{"#+=",KSYM,0,1},{"\xE0\xB8\x81/A",KLANG,0,1},{"Search",KSUBMIT,0,2}}
+const std::vector<std::vector<Key>> KB_SHIFT = {
+    {TS("!"),TS("@"),TS("#"),TS("$"),TS("%"),TS("^"),TS("&"),TS("*"),TS("("),TS(")")},
+    {TS("Q"),TS("W"),TS("E"),TS("R"),TS("T"),TS("Y"),TS("U"),TS("I"),TS("O"),TS("P")},
+    {TS("A"),TS("S"),TS("D"),TS("F"),TS("G"),TS("H"),TS("J"),TS("K"),TS("L"),TS(":")},
+    {{"\xE2\x87\xA7",KSHIFT,0,1},TS("Z"),TS("X"),TS("C"),TS("V"),TS("B"),TS("N"),TS("M"),TS("?"),
+     {"\xE2\x8C\xAB",KDEL,0,1}},
+    KB_BOTTOM4,
+};
+const std::vector<std::vector<Key>> KB_SYM = {
+    {TS("1"),TS("2"),TS("3"),TS("4"),TS("5"),TS("6"),TS("7"),TS("8"),TS("9"),TS("0")},
+    {TS("-"),TS("_"),TS("="),TS("+"),TS("["),TS("]"),TS("{"),TS("}"),TS("\\"),TS("|")},
+    {TS("`"),TS("~"),TS(";"),TS(":"),TS("'"),TS("\""),TS("<"),TS(">"),TS("/"),TS("@")},
+    {{"\xE2\x87\xA7",KSHIFT,0,1},TS("!"),TS("#"),TS("$"),TS("%"),TS("^"),TS("&"),TS("*"),TS("?"),
+     {"\xE2\x8C\xAB",KDEL,0,1}},
+    KB_BOTTOM4,
+};
+#undef TS
+#undef KB_BOTTOM4
 // Brick OS: Thai on the standard Kedmanee layout (TIS 820-2538), as on Thai PC and phone
 // keyboards. A lone mark is shown on a dotted circle (label) and types the mark (text).
 #define TK(t) {t, KCHAR, 0, 1, t}
@@ -129,7 +151,7 @@ const std::vector<std::vector<Key>> KB_TH = {
      TK("ผ"),TK("ป"),TK("แ"),TK("อ"),TM("ิ"),TM("ื"),TK("ท"),TK("ม"),TK("ใ"),TK("ฝ"),
      {"\xE2\x8C\xAB",KDEL,0,1}},
     {{"\xE2\x97\x80",KLEFT,0,1},{"\xE2\x96\xB6",KRIGHT,0,1},
-     {"space",KSPACE,' ',6},{"-",KCHAR,'-',1},{"\xE0\xB8\x81/A",KLANG,0,1},
+     {"space",KSPACE,' ',6},{"#+=",KSYM,0,1},{"\xE0\xB8\x81/A",KLANG,0,1},
      {"Search",KSUBMIT,0,2}},
 };
 const std::vector<std::vector<Key>> KB_TH_SHIFT = {
@@ -140,7 +162,7 @@ const std::vector<std::vector<Key>> KB_TH_SHIFT = {
      TK("("),TK(")"),TK("ฉ"),TK("ฮ"),TM("ฺ"),TM("์"),TK("?"),TK("ฒ"),TK("ฬ"),TK("ฦ"),
      {"\xE2\x8C\xAB",KDEL,0,1}},
     {{"\xE2\x97\x80",KLEFT,0,1},{"\xE2\x96\xB6",KRIGHT,0,1},
-     {"space",KSPACE,' ',6},{"-",KCHAR,'-',1},{"\xE0\xB8\x81/A",KLANG,0,1},
+     {"space",KSPACE,' ',6},{"#+=",KSYM,0,1},{"\xE0\xB8\x81/A",KLANG,0,1},
      {"Search",KSUBMIT,0,2}},
 };
 #undef TK
@@ -157,9 +179,17 @@ const std::vector<std::vector<Key>> KB_NUM = {
 };
 } // namespace
 
+const std::vector<std::vector<Key>>& App_kb_layout(bool num, bool sym, bool thai, bool shift) {
+    if (num) return KB_NUM;
+    if (sym) return KB_SYM;
+    if (thai) return shift ? KB_TH_SHIFT : KB_TH;
+    return shift ? KB_SHIFT : KB;
+}
+#define kb_layout() App_kb_layout(kb_numeric(), kb_sym_, kb_thai_, kb_shift_)
+
 // Relative "age" for display. Search results already come as "3 months ago"
 // (pass through). RSS gives ISO-8601 UTC (has 'T') -> compute relative age.
-static std::string humanize_age(const std::string& p) {
+std::string humanize_age(const std::string& p) {
     if (p.empty()) return "";
     if (p.find('T') == std::string::npos) return p;   // already human (search)
     int y, mo, d, h, mi, se;
@@ -411,24 +441,6 @@ void App::load_fonts() {
     load_design_fonts();
 }
 
-App::GridMetrics App::grid_metrics() const {
-    GridMetrics m;
-    m.s = win_->height() / 720.f;
-    m.hbar = 84 * m.s;
-    m.pad = 28 * m.s;
-    m.gutter = 22 * m.s;
-    m.cardw = (win_->width() - m.pad*2 - m.gutter*(cols_-1)) / cols_;
-    m.thumbh = m.cardw * 9.f / 16.f;
-    m.meta_h = font_body_->line_height() + 2 * font_small_->line_height() + 18 * m.s;   // title + author + "views · age"
-    m.cardh = m.thumbh + m.meta_h;
-    m.rowstep = m.cardh + m.gutter;
-    // Channel views carry a tab strip between the header and the grid; its height
-    // scales with the window (recomputed every frame -> resize-safe).
-    m.tabs_h = (channel_tabs_active() || home_tabs_active() || search_tabs_active()) ? 52 * m.s : 0;
-    m.top = m.hbar + m.tabs_h + m.pad;
-    m.fh = 44 * m.s;
-    return m;
-}
 
 int App::compute_columns() const {
     // Aim for ~380px-wide cards; fewer columns on small/narrow screens means
@@ -1576,6 +1588,7 @@ void App::adjust_setting(MenuAction a, int dir) {
         view_mode_ = (ViewMode)nv;
         it_.set_setting_int("view", nv);
         carousel_pos_ = sel_;
+        scroll_ = 0; ensure_visible();   // the focused tile in view in the new layout
         int keep = menu_sel_; reopen_settings_menu(); menu_sel_ = keep;
         return;
     }
@@ -1604,34 +1617,6 @@ void App::adjust_setting(MenuAction a, int dir) {
     // Future bool settings toggle here (dir flips the value).
 }
 
-// ---------- Resume prompt ----------
-void App::render_resume_prompt(gfx::Renderer& rn) {
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    rn.quad({0, 0, (float)W, (float)H}, theme_.bg.with_a(0.72f));
-    float pw = std::min(560.f*s, W*0.82f), ph = 250*s;
-    float px = (W-pw)/2, py = (H-ph)/2;
-    rn.quad({px-20*s, py-20*s, pw+40*s, ph+40*s}, theme_.panel);
-    rn.quad({px-20*s, py-20*s, pw+40*s, 4*s}, theme_.accent);
-    rn.text(*font_body_, font_body_->ellipsize(resume_prompt_item_.title, pw), px, py, theme_.text);
-    int m = (int)resume_prompt_pos_/60, sec = (int)resume_prompt_pos_%60;
-    char tb[16]; std::snprintf(tb, sizeof tb, "%d:%02d", m, sec);
-    std::string opts[2] = { std::string(i18n::tr(i18n::Str::ResumeFrom)) + " " + tb,
-                            i18n::tr(i18n::Str::StartOver) };
-    float iy = py + 60*s, ih = 56*s, gap = 10*s;
-    for (int i = 0; i < 2; ++i) {
-        bool sel = (i == resume_prompt_sel_);
-        rn.quad({px, iy, pw, ih}, sel ? theme_.card_sel : theme_.card);
-        if (sel) rn.quad({px, iy, 4*s, ih}, theme_.accent);
-        rn.text(*font_body_, opts[i], px + 18*s, iy + (ih-font_body_->line_height())/2 + 3*s,
-                sel ? theme_.text : theme_.text_dim);
-        iy += ih + gap;
-    }
-    rn.text(*font_small_, i18n::tr(i18n::Str::FooterResume),
-            px, iy + 8*s, theme_.text_dim);
-    rn.end();
-}
 
 // ---------- Description overlay ----------
 void App::open_description(const yt::SearchResult& v) {
@@ -3411,8 +3396,8 @@ void App::input(Action a) {
         // Cast mode has a trailing "Add a device" row; Link mode is devices only.
         int rows = (int)cast_devices_.size() + (cast_picker_mode_ == PickerMode::Cast ? 1 : 0);
         switch (a) {
-            case Action::Up:     if (cast_sel_ > 0) cast_sel_--; break;
-            case Action::Down:   if (cast_sel_ < rows - 1) cast_sel_++; break;
+            case Action::Up:     wrap_step(cast_sel_, rows, -1); break;
+            case Action::Down:   wrap_step(cast_sel_, rows, 1); break;
             case Action::Select: cast_activate(); break;
             case Action::Back:   cast_picker_open_ = false; break;   // Link mode: back to manage
             default: break;
@@ -3436,8 +3421,8 @@ void App::input(Action a) {
     if (cast_manage_open_ && mode_ != Mode::Search) {
         int rows = (int)cast_paired_.size() + 1;    // + "Link a device"
         switch (a) {
-            case Action::Up:     if (cast_manage_sel_ > 0) cast_manage_sel_--; break;
-            case Action::Down:   if (cast_manage_sel_ < rows - 1) cast_manage_sel_++; break;
+            case Action::Up:     wrap_step(cast_manage_sel_, rows, -1); break;
+            case Action::Down:   wrap_step(cast_manage_sel_, rows, 1); break;
             case Action::Select: manage_activate(); break;
             case Action::Back:   cast_manage_open_ = false; open_settings(); break;  // back to Settings
             default: break;
@@ -3449,8 +3434,8 @@ void App::input(Action a) {
     if (comments_open_) {
         int n = (int)comment_units_.size();
         switch (a) {
-            case Action::Up:    if (comments_sel_ > 0) comments_sel_--; break;
-            case Action::Down:  if (comments_sel_ + 1 < n) comments_sel_++; break;
+            case Action::Up:    wrap_step(comments_sel_, n, -1); break;
+            case Action::Down:  wrap_step(comments_sel_, n, 1); break;
             case Action::Left:  comments_sel_ = std::max(0, comments_sel_ - 6); break;
             case Action::Right: comments_sel_ = std::min(n - 1, comments_sel_ + 6); break;
             case Action::Select: toggle_comment_replies(); break;
@@ -3524,24 +3509,16 @@ void App::input(Action a) {
         switch (a) {
             // the options sheet is two columns of tiles (DESIGN 7.5): Up/Down by a row, Left/Right by a column
             case Action::Up:
-                if (menu_kind_ == MenuKind::Context) { if (menu_sel_ >= 2) menu_sel_ -= 2; }
-                else if (menu_sel_ > 0) menu_sel_--;
-                break;
             case Action::Down:
-                if (menu_kind_ == MenuKind::Context) {
-                    if (menu_sel_ + 2 < n) menu_sel_ += 2;
-                    else if ((menu_sel_ / 2 + 1) * 2 < n) menu_sel_ = n - 1;   // the last row's one tile
-                } else if (menu_sel_ + 1 < n) menu_sel_++;
+                if (menu_kind_ == MenuKind::Context) grid_step(menu_sel_, n, 2, a);
+                else wrap_step(menu_sel_, n, a == Action::Up ? -1 : 1);
                 break;
             case Action::Left:
             case Action::Right: {
                 if (menu_sel_ >= n) break;
                 MenuAction act = menu_items_[menu_sel_].action;
                 if (is_value_action(act)) { adjust_setting(act, a == Action::Right ? +1 : -1); break; }
-                if (menu_kind_ == MenuKind::Context) {
-                    if (a == Action::Right && menu_sel_ % 2 == 0 && menu_sel_ + 1 < n) menu_sel_++;
-                    else if (a == Action::Left && menu_sel_ % 2 == 1) menu_sel_--;
-                } else if (menu_kind_ == MenuKind::Settings) {   // Settings' columns: Right opens the page
+                if (menu_kind_ == MenuKind::Context) grid_step(menu_sel_, n, 2, a); else if (menu_kind_ == MenuKind::Settings) {   // Settings' columns: Right opens the page
                     if (a == Action::Right && is_submenu_action(act)) menu_activate();
                 } else if (settings_cat() >= 0 && a == Action::Left) {   // Left goes back to the categories
                     input(Action::Back);
@@ -3635,7 +3612,7 @@ void App::input(Action a) {
         return;
     }
     if (mode_ == Mode::Search) {
-        const auto& kb = kb_numeric() ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
+        const auto& kb = kb_layout();
         // Rows have different key counts/spans, so vertical moves are SPATIAL: keep the
         // horizontal center and land on whichever key in the target row spans it (a key
         // above the space bar lands on space, above Enter lands on Enter, etc.).
@@ -3661,9 +3638,10 @@ void App::input(Action a) {
         if (sugg_focus_) {
             int n = (int)sugg_.size();
             switch (a) {
-                case Action::Left:  if (sugg_col_ > 0) sugg_col_--; break;
-                case Action::Right: if (sugg_col_ < n - 1) sugg_col_++; break;
-                case Action::Down:  sugg_focus_ = false; break;
+                case Action::Left:  wrap_step(sugg_col_, n, -1); break;
+                case Action::Right: wrap_step(sugg_col_, n, 1); break;
+                case Action::Down:  sugg_focus_ = false; kb_row_ = 0; kb_clamp(); break;
+                case Action::Up:    if (!held_) { sugg_focus_ = false; kb_row_ = (int)kb.size() - 1; kb_clamp(); } break;
                 case Action::Select: query_input_ = sugg_[std::min(sugg_col_, n - 1)];
                                      kb_caret_ = (int)query_input_.size();
                                      submit_search(); break;
@@ -3675,16 +3653,25 @@ void App::input(Action a) {
             return;
         }
         switch (a) {
-            case Action::Left:  kb_col_ = (kb_col_ > 0) ? kb_col_ - 1 : (int)kb[kb_row_].size()-1; break;
-            case Action::Right: kb_col_ = (kb_col_ < (int)kb[kb_row_].size()-1) ? kb_col_ + 1 : 0; break;
+            case Action::Left:  wrap_step(kb_col_, (int)kb[kb_row_].size(), -1); break;
+            case Action::Right: wrap_step(kb_col_, (int)kb[kb_row_].size(), 1); break;
             case Action::Up:    if (kb_row_ > 0) { float c = xcenter(kb_row_, kb_col_);
                                                    kb_col_ = col_at(--kb_row_, c); }
                                 else if (!kb_numeric() && !sugg_.empty()) {
                                     sugg_focus_ = true;
                                     if (sugg_col_ >= (int)sugg_.size()) sugg_col_ = 0;
-                                } break;
+                                } else if (!held_) { float c = xcenter(kb_row_, kb_col_);
+                                                     kb_row_ = (int)kb.size() - 1; kb_col_ = col_at(kb_row_, c); }
+                                break;
             case Action::Down:  if (kb_row_ < (int)kb.size()-1) { float c = xcenter(kb_row_, kb_col_);
-                                                   kb_col_ = col_at(++kb_row_, c); } break;
+                                                   kb_col_ = col_at(++kb_row_, c); }
+                                else if (!held_) {
+                                    if (!kb_numeric() && !sugg_.empty()) {
+                                        sugg_focus_ = true;
+                                        if (sugg_col_ >= (int)sugg_.size()) sugg_col_ = 0;
+                                    } else { float c = xcenter(kb_row_, kb_col_); kb_row_ = 0; kb_col_ = col_at(0, c); }
+                                }
+                                break;
             case Action::Select: kb_activate(); break;
             case Action::Sort:   query_input_.clear(); kb_caret_ = 0; break;   // X clears
             case Action::Search: submit_search(); break;      // Y submits
@@ -3698,7 +3685,7 @@ void App::input(Action a) {
     // Grid / carousel browse. Any user input here cancels a pending autoplay countdown.
     cancel_autoplay();
     if (a == Action::Search) { open_search(); return; }
-    if (a == Action::Sort && view_mode_ == ViewMode::Shelves) { follow_selected(); return; }   // X: ติดตามช่อง
+    if (a == Action::Sort && !results_.empty()) { follow_selected(); return; }   // X: ติดตามช่อง
     if (a == Action::Sort && !query_.empty()) { toggle_search_sort(); return; }  // X: sort search
     if (a == Action::Menu) { open_menu(); return; }   // options for the highlighted item
     if (a == Action::Back && rail_focus_) { rail_focus_ = false; return; }
@@ -3734,21 +3721,16 @@ void App::input(Action a) {
     };
     if (view_mode_ != ViewMode::Grid) {   // carousel & coverflow are 1-D strips
         switch (a) {
-            case Action::Left:  if (sel_ > 0) sel_--; break;
-            case Action::Right: if (sel_ + 1 < n) sel_++; break;
+            case Action::Left:  wrap_step(sel_, n, -1); break;
+            case Action::Right: wrap_step(sel_, n, 1); break;
             case Action::Select: activate(); break;
             default: break;
         }
         return;   // carousel_pos_ eases toward sel_ in render_carousel/coverflow
     }
     switch (a) {
-        case Action::Left:  if (sel_ % cols_ != 0) sel_--; break;
-        case Action::Right: if (sel_ % cols_ != cols_-1 && sel_+1 < n) sel_++; break;
-        case Action::Up:    if (sel_ - cols_ >= 0) sel_ -= cols_; break;
-        case Action::Down:
-            if (sel_ + cols_ < n) sel_ += cols_;                    // tile directly below
-            else if (sel_ / cols_ < (n - 1) / cols_) sel_ = n - 1;  // partial last row: fall to the last tile
-            break;
+        case Action::Left: case Action::Right: case Action::Up: case Action::Down:
+            grid_step(sel_, n, cols_, a); break;
         case Action::Select: activate(); break;
         default: break;
     }
@@ -3914,6 +3896,7 @@ void App::toggle_view() {
     view_mode_ = (ViewMode)(((int)view_mode_ + 1) % 5);   // Grid->Carousel->3D->Coverflow->TV
     it_.set_setting_int("view", (int)view_mode_);
     carousel_pos_ = sel_; carousel_vel_ = 0;
+    scroll_ = 0; ensure_visible();
 }
 // Critically-damped spring (Unity-style SmoothDamp) glide of carousel_pos_ toward
 // the selected index — frame-rate independent, velocity-continuous, so a press
@@ -4040,205 +4023,9 @@ bool App::is_submenu_action(MenuAction a) {
 
 // render_menu: ui_bos_menu.cpp
 
-void App::render_cast_picker(gfx::Renderer& rn) {
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    bool link = (cast_picker_mode_ == PickerMode::Link);
-    rn.begin(W, H);
-    rn.quad({0, 0, (float)W, (float)H}, theme_.bg.with_a(0.72f));
-    int addrow = link ? 0 : 1;               // Cast mode has a trailing "Add a device"
-    int n = (int)cast_devices_.size() + addrow;
-    float iw = std::min(600.f*s, W*0.86f), ih = 58*s, gap = 8*s, title_h = 56*s, foot_h = 34*s;
-    float ph = title_h + std::max(1,n)*(ih+gap) + foot_h;
-    float px = (W-iw)/2, py = (H-ph)/2;
-    rn.round_rect({px-24*s, py-24*s, iw+48*s, ph+48*s}, 24*s, theme_.panel);
-    rn.text(*font_body_, i18n::tr(link ? i18n::Str::CastAddDevice : i18n::Str::MenuCastToDevice),
-            px, py, theme_.text_dim);
-    float iy = py + title_h;
-    for (int i = 0; i < n; ++i) {
-        bool sel = (i == cast_sel_);
-        rn.round_rect({px, iy, iw, ih}, 12*s, sel ? theme_.card_sel : theme_.card);
-        std::string label;
-        if (!link && i == (int)cast_devices_.size())
-            label = std::string("+  ") + i18n::tr(i18n::Str::CastAddDevice);
-        else {
-            const auto& d = cast_devices_[i];
-            label = d.name;
-            if (!link && d.kind == yt::Cast::Kind::CastDevice && d.screen_id.empty())
-                label += "  \xC2\xB7  Chromecast";   // code-free web-receiver row
-        }
-        rn.text(*font_body_, font_body_->ellipsize(label, iw - 36*s),
-                px + 18*s, iy + (ih-font_body_->line_height())/2 + 3*s,
-                sel ? theme_.text : theme_.text_dim);
-        iy += ih + gap;
-    }
-    // Status line: searching / none / connecting.
-    const char* note = cast_disc_running_ ? i18n::tr(i18n::Str::CastSearching)
-                     : cast_play_running_ ? i18n::tr(i18n::Str::CastConnecting)
-                     : cast_devices_.empty() ? i18n::tr(i18n::Str::CastNoDevices) : "";
-    if (note[0]) rn.text(*font_small_, note, px, py + title_h - 26*s, theme_.text_dim);
-    rn.text(*font_small_, i18n::tr(i18n::Str::FooterCastPicker), px, iy + 10*s, theme_.text_dim);
-    rn.end();
-}
 
-void App::render_manage_devices(gfx::Renderer& rn) {
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    rn.quad({0, 0, (float)W, (float)H}, theme_.bg.with_a(0.72f));
-    int n = (int)cast_paired_.size() + 1;   // + "Link a device"
-    float iw = std::min(600.f*s, W*0.86f), ih = 58*s, gap = 8*s, title_h = 56*s, foot_h = 34*s;
-    float ph = title_h + n*(ih+gap) + foot_h;
-    float px = (W-iw)/2, py = (H-ph)/2;
-    rn.round_rect({px-24*s, py-24*s, iw+48*s, ph+48*s}, 24*s, theme_.panel);
-    rn.text(*font_body_, i18n::tr(i18n::Str::SetLinkedDevices), px, py, theme_.text_dim);
-    float iy = py + title_h;
-    for (int i = 0; i < n; ++i) {
-        bool sel = (i == cast_manage_sel_);
-        rn.round_rect({px, iy, iw, ih}, 12*s, sel ? theme_.card_sel : theme_.card);
-        std::string label = (i == (int)cast_paired_.size())
-            ? std::string("+  ") + i18n::tr(i18n::Str::CastAddDevice)
-            : cast_paired_[i].name;
-        rn.text(*font_body_, font_body_->ellipsize(label, iw - 36*s),
-                px + 18*s, iy + (ih-font_body_->line_height())/2 + 3*s,
-                sel ? theme_.text : theme_.text_dim);
-        iy += ih + gap;
-    }
-    if (cast_paired_.empty())
-        rn.text(*font_small_, i18n::tr(i18n::Str::CastNoLinked), px, py + title_h - 26*s, theme_.text_dim);
-    // Footer: the "Link a device" row can't be removed, so show the right hint.
-    const char* foot = (cast_manage_sel_ == (int)cast_paired_.size())
-                     ? i18n::tr(i18n::Str::FooterCastPicker)   // A: select   B: cancel
-                     : i18n::tr(i18n::Str::FooterManage);      // A: remove   B: back
-    rn.text(*font_small_, foot, px, iy + 10*s, theme_.text_dim);
 
-    // "Remove Device?" yes/no dialog on top of the list.
-    if (cast_confirm_remove_ &&
-        cast_manage_sel_ >= 0 && cast_manage_sel_ < (int)cast_paired_.size()) {
-        rn.quad({0, 0, (float)W, (float)H}, theme_.bg.with_a(0.6f));
-        float dw = std::min(460.f*s, W*0.82f), dh = 210*s;
-        float dx = (W-dw)/2, dy = (H-dh)/2;
-        rn.quad({dx-20*s, dy-20*s, dw+40*s, dh+40*s}, theme_.panel);
-        rn.quad({dx-20*s, dy-20*s, dw+40*s, 4*s}, theme_.accent);
-        rn.text(*font_body_, i18n::tr(i18n::Str::CastRemoveConfirm), dx, dy, theme_.text);
-        std::string dname = font_body_->ellipsize(cast_paired_[cast_manage_sel_].name, dw);
-        rn.text(*font_small_, dname, dx, dy + 40*s, theme_.text_dim);
-        // No / Yes buttons.
-        float bw = (dw - 16*s)/2, bh = 52*s, by = dy + dh - bh - 34*s;
-        const i18n::Str labels[2] = { i18n::Str::No, i18n::Str::Yes };
-        for (int i = 0; i < 2; ++i) {
-            bool sel = (i == cast_confirm_sel_);
-            float bx = dx + i*(bw + 16*s);
-            rn.quad({bx, by, bw, bh}, sel ? theme_.card_sel : theme_.card);
-            if (sel) rn.quad({bx, by, bw, 3*s}, theme_.accent);
-            const char* lbl = i18n::tr(labels[i]);
-            float tw = font_body_->text_width(lbl);
-            rn.text(*font_body_, lbl, bx + (bw-tw)/2, by + (bh-font_body_->line_height())/2 + 3*s,
-                    sel ? theme_.text : theme_.text_dim);
-        }
-        rn.text(*font_small_, i18n::tr(i18n::Str::FooterConfirm),
-                dx, by + bh + 12*s, theme_.text_dim);
-    }
-    rn.end();
-}
 
-void App::render_remote(gfx::Renderer& rn) {
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    rn.clear(theme_.bg);
-    // "Casting to <TV>"
-    std::string to = std::string(i18n::tr(i18n::Str::CastingTo)) + "  " + cast_name_;
-    rn.text(*font_body_, to, (W - font_body_->text_width(to))/2, H*0.24f, theme_.text_dim);
-    // Title of what's playing.
-    std::string t = font_title_->ellipsize(cast_target_title_, W*0.86f);
-    rn.text(*font_title_, t, (W - font_title_->text_width(t))/2, H*0.32f, theme_.text);
-    // Big play/pause glyph.
-    float cx = W/2.f, cy = H*0.52f;
-    gfx::Color ac = theme_.accent;
-    if (cast_paused_) {   // paused -> show a play triangle (degenerate quad)
-        float r = 34*s;
-        rn.quad4(cx - r*0.5f, cy - r,  cx + r, cy,  cx - r*0.5f, cy + r,  cx - r*0.5f, cy - r, ac);
-    } else {              // playing -> pause bars
-        float bw = 14*s, bh = 54*s, gp = 16*s;
-        rn.quad({cx - gp/2 - bw, cy - bh/2, bw, bh}, ac);
-        rn.quad({cx + gp/2,      cy - bh/2, bw, bh}, ac);
-    }
-    // Position (estimated) + volume.
-    auto tstr = [](double v){ int m=(int)v/60, sec=(int)v%60; char b[16]; std::snprintf(b,sizeof b,"%d:%02d",m,sec); return std::string(b); };
-    std::string pos = tstr(cast_est_pos());
-    rn.text(*font_body_, pos, (W - font_body_->text_width(pos))/2, H*0.62f, theme_.text_dim);
-    char vol[24]; std::snprintf(vol, sizeof vol, "Vol %d%%", cast_vol_);
-    rn.text(*font_small_, vol, (W - font_small_->text_width(vol))/2, H*0.68f, theme_.text_dim);
-    // Footer hints.
-    float fh = 44*s;
-    rn.quad({0, H-fh, (float)W, fh}, theme_.panel);
-    const char* foot = i18n::tr(i18n::Str::FooterRemote);
-    rn.text(*font_small_, foot, (W - font_small_->text_width(foot))/2, H - fh + 12*s, theme_.text_dim);
-    rn.end();
-}
-
-// Draw the thumbnail area for one item into rect r (kind-aware), tinted by alpha.
-// Shared by grid / carousel / coverflow.
-void App::draw_thumb(gfx::Renderer& rn, const yt::SearchResult& v,
-                     const gfx::Rect& r, float s, float alpha) {
-    auto A  = [&](gfx::Color c){ return c.with_a(c.a * alpha); };
-    gfx::Color tint{1,1,1,alpha};
-    rn.quad(r, A(theme_.thumb_bg));
-
-    if (v.is_channel()) {
-        float av = r.h * 0.82f;
-        gfx::Rect ar{r.x + (r.w-av)/2, r.y + (r.h-av)/2, av, av};
-        std::string url = v.thumbnail_url;
-        if (url.empty()) { url = chan_meta_.avatar(v.channel_id);
-            if (!url.empty()) thumbs_.request(url); }
-        if (auto* tex = url.empty() ? nullptr : thumbs_.get(url)) rn.textured_cover(ar, *tex, tint);
-        else {
-            rn.quad(ar, A(theme_.card_sel));
-            std::string ini(1, v.title.empty() ? '?' : (char)std::toupper((unsigned char)v.title[0]));
-            rn.text(*font_title_, ini, ar.x + av/2 - font_title_->text_width(ini)/2,
-                    ar.y + av/2 - font_title_->line_height()/2, A(theme_.text));
-        }
-    } else if (v.is_post()) {
-        gfx::Texture* ptex = v.thumbnail_url.empty() ? nullptr : thumbs_.get(v.thumbnail_url);
-        if (ptex) rn.textured_cover(r, *ptex, tint);
-        else {
-            rn.quad(r, A(theme_.card_sel));
-            float lw = r.w - 24*s, ly = r.y + 12*s, lh = font_small_->line_height() + 4*s;
-            int maxl = (int)((r.h - 24*s) / lh);
-            size_t i2 = 0; int ln = 0; const std::string& text = v.title;
-            while (ln < maxl && i2 < text.size()) {
-                size_t start = i2; std::string line;
-                while (i2 < text.size() && text[i2] != '\n') {
-                    size_t adv = 1; uint8_t c = (uint8_t)text[i2];
-                    if ((c>>5)==0x6) adv=2; else if ((c>>4)==0xE) adv=3; else if ((c>>3)==0x1E) adv=4;
-                    std::string cand = line + text.substr(i2, adv);
-                    if (font_small_->text_width(cand) > lw) break;
-                    line = std::move(cand); i2 += adv;
-                }
-                if (i2 < text.size() && text[i2]=='\n') ++i2;
-                if (line.empty() && start==i2) break;
-                rn.text(*font_small_, line, r.x + 12*s, ly, A(theme_.text_dim));
-                ly += lh; ++ln;
-            }
-        }
-    } else {
-        // video / short / playlist: cover image + a corner pill.
-        if (auto* tex = v.thumbnail_url.empty() ? nullptr : thumbs_.get(v.thumbnail_url))
-            rn.textured_cover(r, *tex, tint);
-        else rn.text(*font_small_, i18n::tr(i18n::Str::Loading), r.x + 12*s, r.y + r.h/2 - 9*s, A(theme_.text_dim));
-        // No badge on Shorts; videos show duration, playlists show the item count.
-        std::string pill = v.is_short ? std::string()
-                         : v.is_playlist() ? v.view_count_text
-                                           : v.length_text;
-        if (!pill.empty()) {
-            float pw = font_small_->text_width(pill) + 14*s, ph = font_small_->line_height() + 2*s;
-            gfx::Rect pr{r.x + r.w - pw - 8*s, r.y + r.h - ph - 8*s, pw, ph};
-            rn.round_rect(pr, 7*s, gfx::Color{0,0,0,0.75f*alpha});
-            rn.text(*font_small_, pill, pr.x + 7*s, pr.y + 1*s, A(theme_.text));
-        }
-    }
-}
 
 // Compose the raw metadata lines for one result (no ellipsize — that's width-dependent
 // and done at draw time). Called once per item when results_ changes, so humanize_age
@@ -4278,114 +4065,7 @@ void App::build_tile_lines() {
     tile_lines_.reserve(results_.size());
     for (const auto& v : results_) tile_lines_.push_back(compose_lines(v, chan_meta_));
 }
-// Draw the 3 metadata lines for item idx at (x,y), width maxw, tinted by alpha. Uses
-// the precomputed raw lines and only allocates a truncated string when text overflows.
-void App::draw_meta(gfx::Renderer& rn, const yt::SearchResult& v, int idx,
-                    float x, float y, float maxw, float s, float alpha, bool center) {
-    gfx::Color tc = theme_.text.with_a(alpha), dc = theme_.text_dim.with_a(alpha);
-    TileLines local;
-    const TileLines* t;
-    if (idx >= 0 && idx < (int)tile_lines_.size()) t = &tile_lines_[idx];
-    else { local = compose_lines(v, chan_meta_); t = &local; }   // fallback
-    // Channel video-count may arrive after the cache was built — refresh l3 live.
-    std::string chan_l3;
-    if (v.is_channel()) { chan_l3 = chan_meta_.video_count(v.channel_id);
-        if (chan_l3.empty()) chan_l3 = t->l3; }
-    // Search shorts have no uploader name in the response; fill l2 once resolved.
-    std::string short_l2;
-    if (v.is_short && t->l2.empty() && !v.channel_id.empty())
-        short_l2 = chan_meta_.name(v.channel_id);
-    const std::string& l1 = t->l1;
-    const std::string& l2 = short_l2.empty() ? t->l2 : short_l2;
-    const std::string& l3 = v.is_channel() ? chan_l3 : t->l3;
-    float lh1 = font_body_->line_height(), lh2 = font_small_->line_height();
-    float y2 = y + lh1 + 4*s, y3 = y2 + lh2 + 3*s;
-    // Emit without copying when the line already fits (ellipsize() copies unconditionally).
-    // center: center each line within [x, x+maxw] (carousel); else left-align (grid).
-    auto emit = [&](gfx::Font& f, const std::string& raw, float yy, gfx::Color c) {
-        if (raw.empty()) return;
-        const std::string& shown = f.text_width(raw) <= maxw ? raw : f.ellipsize(raw, maxw);
-        float lx = center ? x + (maxw - f.text_width(shown)) / 2 : x;
-        rn.text(f, shown, lx, yy, c);
-    };
-    emit(*font_body_,  l1, y,  tc);
-    emit(*font_small_, l2, y2, dc);
-    emit(*font_small_, l3, y3, dc);
-}
 
-// Header bar (title + subtitle + count) and the channel/Home tab strip, drawn at
-// vertical offset hy (grid passes -scroll_ so it slides away; carousel/coverflow
-// pass 0 so it stays pinned). Shared by all browse views.
-// view_label_ is an internal English identity key; translate it only for display.
-static std::string tr_view_label(const std::string& label) {
-    using S = i18n::Str;
-    if (label == "Favorite Channels")  return i18n::tr(S::FavoriteChannels);
-    if (label == "Favorite Playlists") return i18n::tr(S::FavoritePlaylists);
-    if (label == "Watch Later")        return i18n::tr(S::WatchLater);
-    if (label == "History")           return i18n::tr(S::History);
-    if (label == "Downloads")         return i18n::tr(S::Downloads);
-    return label;
-}
-void App::render_browse_chrome(gfx::Renderer& rn, float hy) {
-    const int W = win_->width();
-    float s = win_->height() / 720.f;
-    float hbar = 84 * s;
-    rn.text(*font_title_, "YTC", 32*s, hy+24*s, theme_.text);
-    std::string sub;
-    if (in_channel_view_) {
-        sub = query_;
-        std::string extra = channel_info_.subs_text;
-        if (!channel_info_.video_count_text.empty())
-            extra += (extra.empty() ? "" : "   -   ") + channel_info_.video_count_text;
-        if (!extra.empty()) sub += "    -    " + extra;
-    } else if (!view_label_.empty()) sub = tr_view_label(view_label_);
-    else if (query_.empty())         sub = i18n::tr(i18n::Str::Home);
-    else                             sub = std::string(i18n::tr(i18n::Str::Search)) + ": " + query_;
-    // Right-aligned count/status; measure it first so the subtitle can be ellipsized
-    // to the exact gap and never slides under it (the count grows with "loading more...").
-    std::string count = std::to_string(results_.size()) + " " + i18n::tr(i18n::Str::Results);
-    if (!query_.empty() && !in_channel_view_ && !results_.empty())   // search sort mode
-        count += std::string("  -  ") +
-                 i18n::tr(search_sort_ == 1 ? i18n::Str::SortDate
-                        : search_sort_ == 2 ? i18n::Str::SortPopular : i18n::Str::SortRelevance);
-    if (more_running_ || home_more_running_) count += std::string("  -  ") + i18n::tr(i18n::Str::Loading);
-    if (refresh_running_) count = i18n::tr(i18n::Str::Loading);
-    float count_w = font_small_->text_width(count);
-    rn.text(*font_small_, count, W - count_w - 32*s, hy+34*s, theme_.text_dim);
-    // Subtitle starts clear of the logo (its real width), ends clear of the count.
-    float sub_x = std::max(240*s, 32*s + font_title_->text_width("YTC") + 28*s);
-    float sub_w = (W - count_w - 32*s - 20*s) - sub_x;
-    if (sub_w > 40*s)
-        rn.text(*font_body_, font_body_->ellipsize(sub, sub_w), sub_x, hy+32*s, theme_.text_dim);
-
-    if (channel_tabs_active() || home_tabs_active() || search_tabs_active()) {
-        int active_tab = channel_tabs_active() ? chan_tab_
-                       : search_tabs_active()  ? search_tab_ : home_tab_;
-        GridMetrics tm = grid_metrics();
-        float ty0 = hy + hbar;
-        using S = i18n::Str;
-        // Search omits the Posts tab (YouTube search returns no posts) but adds Channels.
-        const S kTabs[]       = {S::TabAll, S::TabVideos, S::TabShorts, S::TabPosts, S::TabPlaylists};
-        const S kSearchTabs[] = {S::TabAll, S::TabVideos, S::TabShorts, S::FilterChannels, S::TabPlaylists};
-        const S* tabs = search_tabs_active() ? kSearchTabs : kTabs;
-        int ntabs = 5;
-        float tx = 32 * s;
-        for (int i = 0; i < ntabs; ++i) {
-            const char* label = i18n::tr(tabs[i]);
-            float tw = font_body_->text_width(label);
-            float chip_w = tw + 36 * s, chip_h = tm.tabs_h - 12 * s;
-            gfx::Rect chip{tx, ty0 + 6 * s, chip_w, chip_h};
-            bool st = (i == active_tab);
-            // Active tab is always the red accent (via D-pad on the strip OR the L/R
-            // shoulders) — no focus outline.
-            rn.round_rect(chip, chip_h / 2, st ? theme_.ring : theme_.chip);
-            rn.text(*font_body_, label, tx + 18 * s,
-                    ty0 + (tm.tabs_h - font_body_->line_height()) / 2 + 2 * s,
-                    st ? theme_.bg : theme_.text);
-            tx += chip_w + 10 * s;
-        }
-    }
-}
 
 // ---- TV view (ViewMode::Shelves) ------------------------------------------------
 static int shelf_kind(const yt::SearchResult& v) {
@@ -4444,12 +4124,33 @@ void App::rail_activate() {
     else                     load_history();
 }
 
+// DESIGN 5.7: a fresh press at an end goes to the other end; a held direction stops there.
+// Returns 1 moved, 2 wrapped, 0 stayed.
+int App::wrap_step(int& sel, int n, int dir) {
+    if (n <= 0) return 0;
+    int to = sel + dir;
+    if (to >= 0 && to < n) { sel = to; return 1; }
+    if (held_ || n < 2) return 0;
+    sel = to < 0 ? n - 1 : 0;
+    return 2;
+}
+// A grid of `cols` read row by row: Left/Right go along the reading order (past a row's end to the next row's start),
+// Up/Down by a row keeping the column (the last row may be short: Down lands on its last tile); the ends wrap.
+void App::grid_step(int& sel, int n, int cols, Action a) {
+    if (n <= 0 || cols < 1) return;
+    int rows = (n + cols - 1) / cols, r = sel / cols, c = sel % cols;
+    if (a == Action::Left || a == Action::Right) { wrap_step(sel, n, a == Action::Left ? -1 : 1); return; }
+    int nr = r;
+    if (!wrap_step(nr, rows, a == Action::Up ? -1 : 1)) return;
+    sel = std::min(nr * cols + c, n - 1);
+}
+
 void App::shelves_input(Action a) {
     if (shelves_src_n_ != results_.size()) rebuild_shelves();
     if (rail_focus_) {
         switch (a) {
-            case Action::Up:     if (rail_sel_ > 0) rail_sel_--; break;
-            case Action::Down:   if (rail_sel_ < kDrawerItems - 1) rail_sel_++; break;
+            case Action::Up:     wrap_step(rail_sel_, kDrawerItems, -1); break;
+            case Action::Down:   wrap_step(rail_sel_, kDrawerItems, 1); break;
             case Action::Right:  if (!shelves_.empty()) rail_focus_ = false; break;
             case Action::Select: rail_activate(); break;
             default: break;
@@ -4467,11 +4168,11 @@ void App::shelves_input(Action a) {
             if (c > 0) c--;
             else { rail_focus_ = true; rail_sel_ = rail_page(); return; }
             break;
-        case Action::Right: if (c + 1 < (int)shelves_[r].idx.size()) c++; break;
+        case Action::Right: wrap_step(c, (int)shelves_[r].idx.size(), 1); break;
         case Action::Up:
         case Action::Down: {
-            int nr = r + (a == Action::Up ? -1 : 1);
-            if (nr < 0 || nr >= (int)shelves_.size()) return;
+            int nr = r;
+            if (!wrap_step(nr, (int)shelves_.size(), a == Action::Up ? -1 : 1) || nr == r) return;
             shelf_col_[r] = c;   // each row remembers its tile, like a TV launcher
             r = nr;
             c = std::min(shelf_col_[r], (int)shelves_[r].idx.size() - 1);
@@ -4523,7 +4224,7 @@ void App::follow_selected() {
     refresh_favorites();
 }
 
-static int length_seconds(const std::string& s) {   // "1:02:03" / "8:24" -> seconds, 0 if none
+int length_seconds(const std::string& s) {   // "1:02:03" / "8:24" -> seconds, 0 if none
     int total = 0, part = 0; bool any = false;
     for (char c : s) {
         if (c >= '0' && c <= '9') { part = part * 10 + (c - '0'); any = true; }
@@ -4586,132 +4287,13 @@ void App::render_shelves(gfx::Renderer& rn) {
                                        if (!av.empty()) thumbs_.request(av); }
             if (x + cardw < 0 || x > W) continue;
             bool foc = have && !rail_focus_ && r == fr && c == fc;
-            // the focused card x1.04 with the ring (4 px, focus colour) outside a 4 px gap
-            gfx::Rect tr = foc ? gfx::Rect{x - cardw * 0.02f, ty - thumbh * 0.02f, cardw * 1.04f, thumbh * 1.04f}
-                               : gfx::Rect{x, ty, cardw, thumbh};
-            if (foc) design_ring(rn, tr, rad);
-            rn.quad(tr, gfx::Color::rgb(0x1C1C1F));
-            gfx::Color tint{1, 1, 1, 1};
-            std::string url = v.thumbnail_url;
-            if (url.empty() && v.is_channel()) url = chan_meta_.avatar(v.channel_id);
-            if (auto* tex = url.empty() ? nullptr : thumbs_.get(url)) {
-                if (v.is_channel()) { float av = tr.h * 0.82f;
-                    rn.textured_cover({tr.x + (tr.w - av) / 2, tr.y + (tr.h - av) / 2, av, av}, *tex, tint); }
-                else rn.textured_cover(tr, *tex, tint);
-            } else if (v.is_post()) {
-                rn.text(mf, mf.ellipsize(v.title.substr(0, v.title.find('\n')), tr.w - 24*u), tr.x + 12*u, tr.y + 12*u,
-                        gfx::Color::rgb(0xB4B4BA));
-            }
-            // watched: a 5 high track (white 25 %) along the bottom, red (youtube) as far as the saved position
-            int len = length_seconds(v.length_text);
-            if (len > 0 && !v.video_id.empty()) {
-                double pos = it_.resume_pos(v.video_id);
-                if (pos > 0) {
-                    rn.quad({tr.x, tr.y + tr.h - 5*u, tr.w, 5*u}, dzc::white.with_a(0.25f));
-                    rn.quad({tr.x, tr.y + tr.h - 5*u, (float)(tr.w * std::min(1.0, pos / len)), 5*u},
-                            gfx::Color::rgb(0xFF0033));
-                }
-            }
-            std::string pill = v.is_short ? std::string() : v.is_playlist() ? v.view_count_text : v.length_text;
-            if (!pill.empty()) {   // duration: 18/600 on black 80 %, radius 8, padding 2 8, 10 from the corner
-                const gfx::Font& pf = dz(DZ_PILL);
-                float pw = pf.text_width(pill) + 16*u, ph = pf.line_height() + 4*u;
-                gfx::Rect pr{tr.x + tr.w - 10*u - pw, tr.y + tr.h - 10*u - ph, pw, ph};
-                rn.round_rect(pr, 8*u, dzc::bg.with_a(0.8f));
-                rn.text(pf, pill, pr.x + 8*u, pr.y + 2*u, dzc::white);
-            }
-            rn.round_corners(tr, rad, dzc::bg);
-            std::string title = v.is_post() ? v.title.substr(0, v.title.find('\n')) : v.title;
-            const gfx::Font& tf = foc ? cff : cf;
-            float ly = ty + thumbh + 12*u;
-            rn.text(tf, tf.ellipsize(title, cardw), x, ly, dzc::white);
-            std::string meta;
-            auto add = [&](const std::string& p) { if (!p.empty()) meta += (meta.empty() ? "" : " \xC2\xB7 ") + p; };
-            if (v.is_channel()) add(v.subs_text);
-            else { add(v.author); add(v.view_count_text); add(v.published_text); }
-            rn.text(mf, mf.ellipsize(meta, cardw), x, ly + cf.line_height() + 2*u, gfx::Color::rgb(0xB4B4BA));
+            design_card(rn, i, x, ty, cardw, thumbh, foc);
         }
         y += rh;
     }
 
-    // top: the status bar, then the search pill 220x48, the tab chips 48, the quality badge
-    rn.quad({0, 0, (float)W, rows_top}, dzc::bg);
-    design_status_bar(rn);
-    const gfx::Color surf = gfx::Color::rgb(0x1C1C1F), text2 = gfx::Color::rgb(0xB4B4BA);
-    if (in_channel_view_) {   // avatar 96, name 44/700, "@handle · subscribers · videos" 24, the follow pill
-        const float ay = bar + 4*u, a = 96*u;
-        std::string cid = channel_info_.channel_id;
-        std::string av = channel_info_.avatar_url.empty() ? chan_meta_.avatar(cid) : channel_info_.avatar_url;
-        rn.round_rect({cx0, ay, a, a}, a / 2, bos_.primary);
-        gfx::Texture* at = av.empty() ? nullptr : (thumbs_.request(av), thumbs_.get(av));
-        if (at) { rn.textured_cover({cx0, ay, a, a}, *at, dzc::white); rn.round_corners({cx0, ay, a, a}, a / 2, dzc::bg); }
-        else {
-            std::string nm = channel_info_.name.empty() ? query_ : channel_info_.name;
-            size_t e = nm.empty() ? 0 : 1;
-            while (e < nm.size() && ((unsigned char)nm[e] & 0xC0) == 0x80) e++;
-            const gfx::Font& lf = dz(DZ_CH_NAME);
-            rn.text(lf, nm.substr(0, e), cx0 + (a - lf.text_width(nm.substr(0, e))) / 2, ay + (a - lf.line_height()) / 2,
-                    dzc::white);
-        }
-        bool fav = !cid.empty() && fav_ids_.count(cid);
-        const gfx::Font& pf = dz(DZ_CM_NAME);
-        std::string pl = i18n::tr(fav ? S::Subscribed : S::Subscribe);
-        float pw = pf.text_width(pl) + (fav ? 24*u + 10*u : 0) + 48*u, ph = 52*u;
-        gfx::Rect pr{W - 32*u - pw, ay + 22*u, pw, ph};
-        rn.round_rect(pr, ph / 2, fav ? gfx::Color::rgb(0x2C2C30) : dzc::white);
-        float px = pr.x + 24*u;
-        if (fav) { bos_icon(rn, "checkc", px, pr.y + (ph - 24*u) / 2, 24*u, gfx::Color::rgb(0x30D158)); px += 34*u; }
-        rn.text(pf, pl, px, pr.y + (ph - pf.line_height()) / 2, fav ? dzc::white : dzc::bg);
-        const gfx::Font &nf = dz(DZ_CH_NAME), &hf = dz(DZ_SHEET_M);
-        float nx = cx0 + a + 22*u, nw = pr.x - 20*u - nx;
-        std::string name = channel_info_.name.empty() ? query_ : channel_info_.name;
-        rn.text(nf, nf.ellipsize(name, nw), nx, ay + 4*u, dzc::white);
-        std::string line;
-        for (const std::string& p : {channel_info_.handle, channel_info_.subs_text, channel_info_.video_count_text})
-            if (!p.empty()) line += (line.empty() ? "" : " \xC2\xB7 ") + p;
-        rn.text(hf, hf.ellipsize(line, nw), nx, ay + 4*u + nf.line_height(), text2);
-    }
-    rn.round_rect({cx0, top_y, 220*u, pill_h}, 24*u, surf);
-    bos_icon(rn, "search", cx0 + 18*u, top_y + (pill_h - 24*u) / 2, 24*u, text2);
-    std::string q = (!query_.empty() && !in_channel_view_) ? query_ : std::string(i18n::tr(S::Search));
-    const gfx::Font& sf = dz(DZ_SEARCH);
-    rn.text(sf, sf.ellipsize(q, 220*u - 70*u), cx0 + 52*u, top_y + (pill_h - sf.line_height()) / 2, text2);
-    float chip_x = cx0 + 220*u + 12*u, right = W - 32*u;
-    {   // quality badge: 20/600 text2, 1px #38383A, radius 10, padding 4 10
-        int mh = effective_max_height();
-        std::string qb = mh > 0 ? std::to_string(mh) + "p" : std::string("Auto");
-        const gfx::Font& bf = dz(DZ_BADGE);
-        float bw = bf.text_width(qb) + 20*u, bh = bf.line_height() + 8*u;
-        gfx::Rect br{right - bw, top_y + (pill_h - bh) / 2, bw, bh};
-        rn.round_rect(br, 10*u, gfx::Color::rgb(0x38383A));
-        rn.round_rect({br.x + u, br.y + u, br.w - 2*u, br.h - 2*u}, 9*u, dzc::bg);
-        rn.text(bf, qb, br.x + 10*u, br.y + 4*u, text2);
-        right = br.x - 12*u;
-    }
-    if (channel_tabs_active() || home_tabs_active() || search_tabs_active()) {
-        int active = channel_tabs_active() ? chan_tab_ : search_tabs_active() ? search_tab_ : home_tab_;
-        const S kTabs[]       = {S::TabAll, S::TabVideos, S::TabShorts, S::TabPosts, S::TabPlaylists};
-        const S kSearchTabs[] = {S::TabAll, S::TabVideos, S::TabShorts, S::FilterChannels, S::TabPlaylists};
-        const S* tabs = search_tabs_active() ? kSearchTabs : kTabs;
-        float ch = 48*u, cy = top_y, words = 0;
-        for (int i = 0; i < 5; ++i) words += dz(i == active ? DZ_CHIP_SEL : DZ_CHIP).text_width(i18n::tr(tabs[i]));
-        // padding 22 as drawn; less when the five do not fit, down to 12
-        float padx = std::max(12*u, std::min(22*u, (right - chip_x - words - 4 * 10*u) / 10));
-        for (int i = 0; i < 5; ++i) {
-            bool st = i == active;
-            const gfx::Font& f = dz(st ? DZ_CHIP_SEL : DZ_CHIP);
-            const char* label = i18n::tr(tabs[i]);
-            float cw = f.text_width(label) + 2 * padx;
-            if (chip_x + cw > right) break;
-            rn.round_rect({chip_x, cy, cw, ch}, 24*u, st ? dzc::white : surf);
-            rn.text(f, label, chip_x + padx, cy + (ch - f.line_height()) / 2, st ? dzc::bg : text2);
-            chip_x += cw + 10*u;
-        }
-    } else {
-        std::string page = in_channel_view_ ? query_ : tr_view_label(view_label_);
-        if (refresh_running_) page = i18n::tr(S::Loading);
-        rn.text(rf, rf.ellipsize(page, right - chip_x), chip_x, top_y + (pill_h - rf.line_height()) / 2, dzc::white);
-    }
+    design_browse_top(rn, cx0);
+    const gfx::Color text2 = gfx::Color::rgb(0xB4B4BA);
 
     // the rail: 96 wide, 56 circles from 28 under the status bar, gap 14, icons 30; the current page on surface2
     rn.quad({0, bar, cx0 - 4*u, hint_top - bar}, dzc::bg);   // cards scrolled off to the left
@@ -4731,16 +4313,7 @@ void App::render_shelves(gfx::Renderer& rn) {
                            {"history", i18n::tr(S::History)}, {"settings", i18n::tr(S::Settings)},
                            {"list", i18n::tr(S::FavoritePlaylists)}, {"download", i18n::tr(S::Downloads)}},
                       rail_sel_, page);
-    } else if (in_channel_view_) {
-        bool fav = !channel_info_.channel_id.empty() && fav_ids_.count(channel_info_.channel_id);
-        design_hint_bar(rn, {{"A", i18n::tr(S::HintPlay)}, {"B", i18n::tr(S::HintBack)},
-                             {"X", i18n::tr(fav ? S::Unfollow : S::Subscribe)}},
-                        {{"L1 R1", i18n::tr(S::HintTab)}});
-    } else {
-        design_hint_bar(rn, {{"A", i18n::tr(S::HintPlay)}, {"B", i18n::tr(S::HintBack)},
-                             {"X", i18n::tr(S::HintFollow)}, {"Y", i18n::tr(S::HintSearch)}},
-                        {{"SELECT", i18n::tr(S::HintOptions)}});
-    }
+    } else design_browse_hints(rn);
     design_toast(rn);
     rn.end();
 }
@@ -4774,117 +4347,6 @@ void App::render_main_drawer(gfx::Renderer& rn) {
 }
 
 
-void App::render_grid(gfx::Renderer& rn) {
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    rn.clear(theme_.bg);
-
-    // Header bar — part of the scrolled content, so it slides off the top as you
-    // scroll (only visible at the top). Footer stays pinned.
-    float hbar = 84 * s;
-    render_browse_chrome(rn, -scroll_);   // header + tab strip (scrolls away)
-
-    // Empty state: no videos yet (default startup, or an empty search). Guide the
-    // user to search; the Latest feed populates once favorite channels are added.
-    if (results_.empty()) {
-        using S = i18n::Str;
-        const char* l1; const char* l2 = i18n::tr(S::SearchHint); const char* l3;
-        if (retry_pending_ || (refresh_running_ && retry_attempt_ > 0)) {
-            l1 = i18n::tr(S::WaitingNetwork);
-            l2 = i18n::tr(S::Reconnecting);
-            l3 = "";
-        } else if (channel_tabs_active() ||
-            (home_tabs_active() && !home_items_.empty()) ||
-            (home_tabs_active() && refresh_running_) ||
-            (search_tabs_active() && !search_base_.empty())) {   // a search tab with no items of that type
-            l1 = refresh_running_ ? i18n::tr(S::Loading) : i18n::tr(S::NothingInTab);
-            l2 = refresh_running_ ? "" : i18n::tr(S::SwitchTabsHint);
-            l3 = "";
-        } else if (view_label_ == "Favorite Channels") {
-            l1 = i18n::tr(S::NoFavorites);
-            l2 = i18n::tr(S::FavHint2);
-            l3 = i18n::tr(S::FavHint3);
-        } else if (view_label_ == "Favorite Playlists") {
-            l1 = i18n::tr(S::NoFavPlaylists);
-            l2 = i18n::tr(S::FavPlHint2);
-            l3 = "";
-        } else if (view_label_ == "Watch Later") {
-            l1 = i18n::tr(S::WatchLaterEmpty);
-            l2 = i18n::tr(S::WlHint2);
-            l3 = i18n::tr(S::WlHint3);
-        } else if (view_label_ == "History") {
-            l1 = i18n::tr(S::NoHistory);
-            l2 = i18n::tr(S::HistHint2);
-            l3 = i18n::tr(S::HistHint3);
-        } else {
-            l1 = query_.empty() ? i18n::tr(S::NoVideosYet) : i18n::tr(S::NoResults);
-            l3 = query_.empty() ? i18n::tr(S::HomeHint3) : i18n::tr(S::SearchHint3);
-        }
-        rn.text(*font_title_, l1, (W - font_title_->text_width(l1))/2, H*0.40f, theme_.text);
-        rn.text(*font_body_,  l2, (W - font_body_->text_width(l2))/2,  H*0.40f + 52*s, theme_.accent);
-        rn.text(*font_small_, l3, (W - font_small_->text_width(l3))/2, H*0.40f + 92*s, theme_.text_dim);
-        // Footer hints still useful. On a search with no results, surface Select:
-        // filters so a too-narrow filter set can still be reached and loosened.
-        float fh0 = 44*s;
-        rn.quad({0, H-fh0, (float)W, fh0}, theme_.panel);
-        rn.text(*font_small_, i18n::tr(search_tabs_active() ? i18n::Str::FooterSearchEmpty
-                                                            : i18n::Str::FooterHomeMin),
-                32*s, H - fh0 + 12*s, theme_.text_dim);
-        rn.end();
-        return;
-    }
-
-    // Grid geometry (shared with ensure_visible via grid_metrics()).
-    GridMetrics m = grid_metrics();
-    float pad = m.pad, top = m.top, gutter = m.gutter, cardw = m.cardw,
-          thumbh = m.thumbh, cardh = m.cardh, rowstep = m.rowstep;
-
-    // Iterate only the rows in (and just around) the viewport instead of all N — the
-    // prefetch band is ~2 rows, so ±3 rows of margin covers it.
-    int ncards = (int)results_.size();
-    int first_row = std::max(0, (int)((scroll_ - top) / rowstep) - 3);
-    int last_row  = (int)((scroll_ - top + H) / rowstep) + 3;
-    int first_i = first_row * cols_;
-    int last_i  = std::min(ncards, (last_row + 1) * cols_);
-    for (int i = first_i; i < last_i; ++i) {
-        int col = i % cols_, row = i / cols_;
-        float x = pad + col*(cardw+gutter);
-        float y = top + row*rowstep - scroll_;
-        // Prefetch thumbnails for a band around the viewport (~2 rows of slack), so we
-        // only ever download/keep textures near what's on screen (LRU caps the rest).
-        if (y + cardh > -2*rowstep && y < H + 2*rowstep) {
-            const yt::SearchResult& pv = results_[i];
-            if (!pv.thumbnail_url.empty()) thumbs_.request(pv.thumbnail_url);
-            else if (pv.is_channel()) { std::string a = chan_meta_.avatar(pv.channel_id);
-                                        if (!a.empty()) thumbs_.request(a); }
-        }
-        if (y + cardh < 0 || y > H) continue;       // cull offscreen (header scrolls away)
-        bool sel = (i == sel_) && !tab_focus_;
-
-        // Card background + selection ring. The meta/footer keeps its normal color
-        // when selected — the accent border alone marks the highlight.
-        gfx::Rect card{x, y, cardw, cardh};
-        float rad = 14*s;
-        if (sel) rn.round_rect({x-5*s, y-5*s, cardw+10*s, cardh+10*s}, rad+5*s, theme_.ring);
-        rn.round_rect(card, rad, theme_.card);
-
-        const auto& v = results_[i];
-        draw_thumb(rn, v, {x, y, cardw, thumbh}, s, 1.0f);
-        rn.round_corners({x, y, cardw, thumbh}, rad, sel ? theme_.ring : theme_.bg, 1|2);
-        draw_meta(rn, v, i, x + 12*s, y + thumbh + 8*s, cardw - 24*s, s, 1.0f);
-    }
-
-    // Footer hint bar.
-    float fh = 44*s;
-    rn.quad({0, H-fh, (float)W, fh}, theme_.panel);
-    rn.text(*font_small_, browse_footer(),
-            32*s, H - fh + 12*s, theme_.text_dim);
-
-    // Transient status banner (e.g. "This live event will begin in 3 days.").
-    draw_status_banner(rn, hbar + 22*s, s);
-    rn.end();
-}
 
 // Transient status banner (resolve errors, "Added X to favorites", etc.). Width is
 // clamped to the screen and the message ellipsized, so a long channel name never
@@ -4893,242 +4355,9 @@ void App::draw_status_banner(gfx::Renderer& rn, float, float) {   // DESIGN 5.9:
     design_toast(rn);
 }
 
-// Shared empty/loading centre text for the non-grid views. Returns true if it drew
-// something (i.e. there are no tiles to show).
-bool App::browse_empty_overlay(gfx::Renderer& rn) {
-    if (!results_.empty()) return false;
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    const char* l1 = i18n::tr(i18n::Str::NoVideosYet);
-    if (retry_pending_ || (refresh_running_ && retry_attempt_ > 0)) l1 = i18n::tr(i18n::Str::WaitingNetwork);
-    else if (refresh_running_) l1 = i18n::tr(i18n::Str::Loading);
-    else if (!query_.empty()) l1 = i18n::tr(i18n::Str::NoResults);
-    else if (view_label_ == "Watch Later") l1 = i18n::tr(i18n::Str::WatchLaterEmpty);
-    else if (view_label_ == "History") l1 = i18n::tr(i18n::Str::NoHistory);
-    else if (view_label_ == "Favorite Channels") l1 = i18n::tr(i18n::Str::NoFavorites);
-    else if (view_label_ == "Favorite Playlists") l1 = i18n::tr(i18n::Str::NoFavPlaylists);
-    rn.text(*font_title_, l1, (W - font_title_->text_width(l1))/2, H*0.45f, theme_.text);
-    // Match the grid's empty-state: pinned footer bar with the minimal hints.
-    float fh = 44*s;
-    rn.quad({0, H-fh, (float)W, fh}, theme_.panel);
-    rn.text(*font_small_, i18n::tr(i18n::Str::FooterHomeMin), 32*s, H - fh + 12*s, theme_.text_dim);
-    return true;
-}
 
-void App::render_carousel(gfx::Renderer& rn) {
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    rn.clear(theme_.bg);
-    float hbar = 84 * s;
-    render_browse_chrome(rn, 0);          // pinned header + tab strip
 
-    int n = (int)results_.size();
-    if (n == 0) { browse_empty_overlay(rn); rn.end(); return; }
 
-    update_carousel_anim();
-
-    float top = hbar + (channel_tabs_active() || home_tabs_active() || search_tabs_active() ? 52*s : 0);
-    float cx = W / 2.f, cy = top + (H - top) * 0.40f;
-    float big_w = std::min(W * 0.46f, (H - top) * 0.60f * 16.f/9.f);
-    float big_h = big_w * 9.f / 16.f;
-    float spacing = big_w * 0.62f;
-
-    for (int i = std::max(0, sel_-4); i < std::min(n, sel_+5); ++i)
-        thumbs_.request(results_[i].thumbnail_url);
-
-    auto& vis = vis_; vis.clear();       // reused scratch; compute range, don't scan all n
-    { int lo = std::max(0, (int)std::floor(carousel_pos_ - 3.2f));
-      int hi = std::min(n-1, (int)std::ceil(carousel_pos_ + 3.2f));
-      for (int i = lo; i <= hi; ++i)
-          if (std::abs(i - carousel_pos_) <= 3.2f) vis.push_back(i); }
-    std::sort(vis.begin(), vis.end(), [&](int a, int b){
-        return std::abs(a - carousel_pos_) > std::abs(b - carousel_pos_); });
-
-    for (int i : vis) {
-        float d = i - carousel_pos_, dist = std::abs(d);
-        float scale = std::max(0.55f, 1.0f - dist * 0.16f);
-        float w = big_w * scale, h = big_h * scale;
-        float x = cx + d * spacing - w/2, y = cy - h/2;
-        float a = std::max(0.30f, 1.0f - dist * 0.28f);
-        if (i == sel_ && !tab_focus_) rn.quad({x-4*s, y-4*s, w+8*s, h+8*s}, theme_.accent);
-        draw_thumb(rn, results_[i], {x, y, w, h}, s, a);
-    }
-
-    // Centered item metadata below the strip (full, kind-aware, centered-ish).
-    const auto& v = results_[sel_];
-    float mw = W * 0.7f, mx = (W - mw)/2, my = cy + big_h/2 + 24*s;
-    draw_meta(rn, v, sel_, mx, my, mw, s, 1.0f, true);
-    std::string pos = std::to_string(sel_+1) + " / " + std::to_string(n);
-    rn.text(*font_small_, pos, cx - font_small_->text_width(pos)/2, my + 82*s, theme_.text_dim);
-
-    float fh = 44*s;
-    rn.quad({0, H-fh, (float)W, fh}, theme_.panel);
-    rn.text(*font_small_, browse_footer(),
-            32*s, H - fh + 12*s, theme_.text_dim);
-    draw_status_banner(rn, hbar + 16*s, s);
-    rn.end();
-}
-
-// 3D carousel: a spread horizontal flow, the centre tile flat and large, side
-// tiles rotated inward (faux-perspective trapezoids) spaced out, receding + dimming.
-void App::render_carousel3d(gfx::Renderer& rn) {
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    rn.clear(theme_.bg);
-    float hbar = 84 * s;
-    render_browse_chrome(rn, 0);
-
-    int n = (int)results_.size();
-    if (n == 0) { browse_empty_overlay(rn); rn.end(); return; }
-
-    update_carousel_anim();
-
-    float top = hbar + (channel_tabs_active() || home_tabs_active() || search_tabs_active() ? 52*s : 0);
-    float cx = W / 2.f, cy = top + (H - top) * 0.42f;
-    float cardW = std::min(W * 0.40f, (H - top) * 0.58f * 16.f/9.f);
-    float cardH = cardW * 9.f / 16.f;
-    float spacing = cardW * 0.56f;        // neighbours spread out beside the centre card
-
-    for (int i = std::max(0, sel_-5); i < std::min(n, sel_+6); ++i)
-        thumbs_.request(results_[i].thumbnail_url);
-
-    auto& vis = vis_; vis.clear();       // reused scratch; compute range, don't scan all n
-    { int lo = std::max(0, (int)std::floor(carousel_pos_ - 4.5f));
-      int hi = std::min(n-1, (int)std::ceil(carousel_pos_ + 4.5f));
-      for (int i = lo; i <= hi; ++i)
-          if (std::abs(i - carousel_pos_) <= 4.5f) vis.push_back(i); }
-    std::sort(vis.begin(), vis.end(), [&](int a, int b){
-        return std::abs(a - carousel_pos_) > std::abs(b - carousel_pos_); });
-
-    const float kMaxAng = 1.05f, kPersp = 0.32f;   // ~60deg, perspective strength
-    for (int i : vis) {
-        float d = i - carousel_pos_, dist = std::abs(d);
-        bool center = std::abs(d) < 0.12f;
-        float sc = std::max(0.62f, 1.0f - dist * 0.10f);
-        float hw = cardW*0.5f*sc, hh = cardH*0.5f*sc;
-        float x = cx + d * spacing;      // continuous in d -> no jump as it reaches centre
-        float alpha = std::max(0.25f, 1.0f - dist * 0.24f);
-
-        if (center) {                      // flat, full tile (image + pills + badges)
-            gfx::Rect r{x - hw, cy - hh, hw*2, hh*2};
-            if (!tab_focus_) rn.quad({r.x-4*s, r.y-4*s, r.w+8*s, r.h+8*s}, theme_.accent);
-            draw_thumb(rn, results_[i], r, s, 1.0f);
-            continue;
-        }
-        float ang = std::max(-kMaxAng, std::min(kMaxAng, d)) * 0.9f;
-        float cosA = std::cos(ang), sinA = std::sin(ang);
-        float lX = x - hw*cosA, rX = x + hw*cosA;
-        float lY = hh * (1.0f + kPersp*sinA);   // left edge half-height
-        float rY = hh * (1.0f - kPersp*sinA);   // right edge half-height
-        const auto& v = results_[i];
-        gfx::Texture* tex = v.thumbnail_url.empty() ? nullptr : thumbs_.get(v.thumbnail_url);
-        if (tex)
-            rn.textured_quad4(lX, cy-lY, rX, cy-rY, rX, cy+rY, lX, cy+lY, *tex,
-                              gfx::Color{1,1,1,alpha});
-        else
-            rn.quad4(lX, cy-lY, rX, cy-rY, rX, cy+rY, lX, cy+lY,
-                     theme_.card_sel.with_a(alpha));
-    }
-
-    // Centre metadata below the flow.
-    float mw = W * 0.7f, mx = (W - mw)/2, my = cy + cardH*0.5f + 30*s;
-    draw_meta(rn, results_[sel_], sel_, mx, my, mw, s, 1.0f, true);
-    std::string pos = std::to_string(sel_+1) + " / " + std::to_string(n);
-    rn.text(*font_small_, pos, cx - font_small_->text_width(pos)/2, my + 82*s, theme_.text_dim);
-
-    float fh = 44*s;
-    rn.quad({0, H-fh, (float)W, fh}, theme_.panel);
-    rn.text(*font_small_, browse_footer(),
-            32*s, H - fh + 12*s, theme_.text_dim);
-    draw_status_banner(rn, hbar + 16*s, s);
-    rn.end();
-}
-
-// Traditional coverflow: side cards parked at a FIXED inward tilt, stacked close
-// together and receding; the transitioning card folds from tilted -> flat as it
-// reaches centre, then folds to the other side (its outer edge swinging back).
-void App::render_coverflow(gfx::Renderer& rn) {
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    rn.clear(theme_.bg);
-    float hbar = 84 * s;
-    render_browse_chrome(rn, 0);
-
-    int n = (int)results_.size();
-    if (n == 0) { browse_empty_overlay(rn); rn.end(); return; }
-    update_carousel_anim();
-
-    float top = hbar + (channel_tabs_active() || home_tabs_active() || search_tabs_active() ? 52*s : 0);
-    float cx = W / 2.f, cy = top + (H - top) * 0.44f;
-    float cardW = std::min(W * 0.42f, (H - top) * 0.60f * 16.f/9.f);
-    float cardH = cardW * 9.f / 16.f;
-
-    const float kTilt   = 1.15f;              // parked side tilt (~66 deg)
-    float parkX  = cardW * 0.62f;             // how far a parked side card's centre sits
-    float stackX = cardW * 0.28f;             // extra x per additional stacked card
-    float hhC = cardH * 0.5f;                 // centre half-height
-
-    for (int i = std::max(0, sel_-8); i < std::min(n, sel_+9); ++i)
-        thumbs_.request(results_[i].thumbnail_url);
-
-    auto& vis = vis_; vis.clear();       // reused scratch; compute range, don't scan all n
-    { int lo = std::max(0, (int)std::floor(carousel_pos_ - 6.5f));
-      int hi = std::min(n-1, (int)std::ceil(carousel_pos_ + 6.5f));
-      for (int i = lo; i <= hi; ++i)
-          if (std::abs(i - carousel_pos_) <= 6.5f) vis.push_back(i); }
-    std::sort(vis.begin(), vis.end(), [&](int a, int b){
-        return std::abs(a - carousel_pos_) > std::abs(b - carousel_pos_); });
-
-    for (int i : vis) {
-        float d = i - carousel_pos_, ad = std::abs(d);
-        float sgn = d < 0 ? -1.f : 1.f;
-        float slide = std::min(ad, 1.f);          // 0..1: folding/sliding-out phase
-        float extra = std::max(0.f, ad - 1.f);    // beyond first side slot: stacked
-        bool center = ad < 0.10f;
-
-        float ang = kTilt * (d < 0 ? -slide : slide);   // 0 at centre -> ±kTilt parked
-        float scale = 1.0f - 0.12f*slide - 0.03f*std::min(extra, 4.f);
-        float hw = cardW*0.5f*scale, hh = cardH*0.5f*scale;
-        float x = cx + sgn * (parkX*slide + stackX*extra);
-        float alpha = std::max(0.28f, 1.0f - 0.10f*slide - 0.18f*std::min(extra,4.f));
-
-        if (center) {
-            gfx::Rect r{x - hw, cy - hh, hw*2, hh*2};
-            if (!tab_focus_) rn.quad({r.x-4*s, r.y-4*s, r.w+8*s, r.h+8*s}, theme_.accent);
-            draw_thumb(rn, results_[i], r, s, 1.0f);
-            continue;
-        }
-        float cosA = std::cos(ang), sinA = std::sin(ang);
-        float lX = x - hw*cosA, rX = x + hw*cosA;
-        float persp = 0.35f;
-        // Inner edge nearer -> taller. Right card (d>0, sinA>0): inner = LEFT edge tall.
-        float lY = hh * (1.0f - persp*sinA);
-        float rY = hh * (1.0f + persp*sinA);
-        const auto& v = results_[i];
-        gfx::Texture* tex = v.thumbnail_url.empty() ? nullptr : thumbs_.get(v.thumbnail_url);
-        if (tex)
-            rn.textured_quad4(lX, cy-lY, rX, cy-rY, rX, cy+rY, lX, cy+lY, *tex,
-                              gfx::Color{1,1,1,alpha});
-        else
-            rn.quad4(lX, cy-lY, rX, cy-rY, rX, cy+rY, lX, cy+lY,
-                     theme_.card_sel.with_a(alpha));
-    }
-
-    float mw = W * 0.7f, mx = (W - mw)/2, my = cy + hhC + 30*s;
-    draw_meta(rn, results_[sel_], sel_, mx, my, mw, s, 1.0f, true);
-    std::string pos = std::to_string(sel_+1) + " / " + std::to_string(n);
-    rn.text(*font_small_, pos, cx - font_small_->text_width(pos)/2, my + 82*s, theme_.text_dim);
-
-    float fh = 44*s;
-    rn.quad({0, H-fh, (float)W, fh}, theme_.panel);
-    rn.text(*font_small_, browse_footer(),
-            32*s, H - fh + 12*s, theme_.text_dim);
-    draw_status_banner(rn, hbar + 16*s, s);
-    rn.end();
-}
 
 void App::adjust_volume(int delta) {
     int v = volume_ + delta;
@@ -5244,18 +4473,18 @@ void App::test_open_numeric_kb() {
     kb_placeholder_.clear();
 }
 void App::kb_activate() {
-    const auto& kb = kb_numeric() ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
+    const auto& kb = kb_layout();
     const Key& k = kb[kb_row_][kb_col_];
     switch (k.type) {
         case KCHAR: {
             std::string t = k.text ? std::string(k.text) : std::string(1, k.ch);
-            if (kb_shift_ && t.size() == 1 && t[0] >= 'a' && t[0] <= 'z') t[0] = (char)(t[0] - 'a' + 'A');
             query_input_.insert((size_t)kb_caret_, t);
             kb_caret_ += (int)t.size();
             kb_shift_ = false;                       // one-shot capital (Thai: one-shot SHIFT layer)
             break;
         }
-        case KLANG:   kb_thai_ = !kb_thai_; kb_shift_ = false; break;
+        case KLANG:   kb_thai_ = !kb_thai_; kb_shift_ = kb_sym_ = false; break;
+        case KSYM:    kb_sym_ = !kb_sym_; kb_shift_ = false; break;
         case KSPACE:  query_input_.insert(query_input_.begin() + kb_caret_, ' '); kb_caret_++; break;
         case KDEL:    backspace(); break;
         case KLEFT:   while (kb_caret_ > 0 && ((unsigned char)query_input_[--kb_caret_] & 0xC0) == 0x80) {} break;
@@ -5265,7 +4494,7 @@ void App::kb_activate() {
                                  ((unsigned char)query_input_[kb_caret_] & 0xC0) == 0x80) kb_caret_++;
                       }
                       break;
-        case KSHIFT:  kb_shift_ = !kb_shift_; break;
+        case KSHIFT:  kb_shift_ = !kb_shift_; kb_sym_ = false; break;
         case KSUBMIT: submit_search(); break;
     }
 }
@@ -5303,20 +4532,6 @@ void App::draw_spinner(gfx::Renderer& rn, float cx, float cy, float r, gfx::Colo
     }
 }
 
-void App::render_loading(gfx::Renderer& rn) {
-    // Drawn ON TOP of the already-rendered (flushed) grid — begin() sets state
-    // but does not clear, so the dimmed grid shows through.
-    const int W = win_->width(), H = win_->height();
-    float s = H / 720.f;
-    rn.begin(W, H);
-    rn.quad({0, 0, (float)W, (float)H}, theme_.bg.with_a(0.72f));
-    draw_spinner(rn, W/2.f, H/2.f - 30*s, 34*s, theme_.accent);
-    std::string msg = i18n::tr(i18n::Str::Loading);
-    rn.text(*font_body_, msg, W/2.f - font_body_->text_width(msg)/2, H/2.f + 26*s, theme_.text);
-    std::string t = font_small_->ellipsize(loading_title_, W * 0.6f);
-    rn.text(*font_small_, t, W/2.f - font_small_->text_width(t)/2, H/2.f + 56*s, theme_.text_dim);
-    rn.end();
-}
 
 
 void App::load_design_fonts() {
@@ -5409,7 +4624,7 @@ void App::render_search(gfx::Renderer& rn) {
         }
     }
 
-    const auto& kb = numeric ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
+    const auto& kb = kb_layout();
     int nrows = (int)kb.size();
     const float keyh = 62*u, gap = 8*u, rgap = 10*u, bottom = H - 64*u;
     float panel_h = 16*u + nrows * keyh + (nrows - 1) * rgap + 16*u;
@@ -5444,6 +4659,7 @@ void App::render_search(gfx::Renderer& rn) {
                     break;
                 case KSPACE: lbl = i18n::tr(S::KbSpace); f = &dz(DZ_KBTN); break;
                 case KLANG:  lbl = "\xE0\xB8\x81/A"; f = &dz(DZ_KBTN); break;
+                case KSYM:   lbl = kb_sym_ ? "abc" : "#+="; f = &dz(DZ_KBTN); break;
                 case KCHAR:
                     if (kb_shift_ && lbl.size() == 1 && lbl[0] >= 'a' && lbl[0] <= 'z') lbl[0] = (char)(lbl[0] - 'a' + 'A');
                     break;
@@ -5475,7 +4691,7 @@ void App::render_search(gfx::Renderer& rn) {
 }
 
 void App::kb_clamp() {
-    const auto& kb = kb_numeric() ? KB_NUM : kb_thai_ ? (kb_shift_ ? KB_TH_SHIFT : KB_TH) : KB;
+    const auto& kb = kb_layout();
     if (kb_row_ >= (int)kb.size()) kb_row_ = (int)kb.size() - 1;
     if (kb_row_ < 0) kb_row_ = 0;
     if (kb_col_ >= (int)kb[kb_row_].size()) kb_col_ = (int)kb[kb_row_].size() - 1;
@@ -5491,10 +4707,10 @@ bool App::kb_pad(int b) {
             query_input_.insert(query_input_.begin() + kb_caret_, ' '); kb_caret_++;
             return true;
         case SDL_CONTROLLER_BUTTON_Y:
-            if (!kb_numeric()) { kb_thai_ = !kb_thai_; kb_shift_ = false; kb_clamp(); }
+            if (!kb_numeric()) { kb_thai_ = !kb_thai_; kb_shift_ = kb_sym_ = false; kb_clamp(); }
             return true;
         case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
-            if (!kb_numeric()) { kb_shift_ = !kb_shift_; kb_clamp(); }
+            if (!kb_numeric()) { kb_shift_ = !kb_shift_; kb_sym_ = false; kb_clamp(); }
             return true;
         case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
             return true;

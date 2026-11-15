@@ -1281,7 +1281,9 @@ int main(int argc, char** argv) {
                 long interval = 150 - (long)(held / 12);   // ramp down as it's held
                 if (interval < 40) interval = 40;
                 if (held > 300 && now - nav_last_rep >= (Uint32)interval) {
+                    app.set_held(true);
                     app.input(nav_action);
+                    app.set_held(false);
                     nav_last_rep = now;
                 }
             }
