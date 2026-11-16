@@ -1219,6 +1219,7 @@ int main(int argc, char** argv) {
                     if (b == SDL_CONTROLLER_BUTTON_B) { bs_held = true; bs_start = bs_last = SDL_GetTicks(); }
                     continue;
                 }
+                if (app.player_pad(b)) continue;   // DESIGN 7.7: L1/R1 clips, START hides (the player)
                 if (b == SDL_CONTROLLER_BUTTON_Y) app.input(A::Search); // open/submit
                 else if (b == SDL_CONTROLLER_BUTTON_X) app.input(A::Sort);      // X = sort (comments)
                 else if (b == SDL_CONTROLLER_BUTTON_BACK) app.input(A::Menu);   // Select btn = options
@@ -1248,8 +1249,14 @@ int main(int argc, char** argv) {
                     st = &stick_y; lo = SDL_CONTROLLER_BUTTON_DPAD_UP;   hi = SDL_CONTROLLER_BUTTON_DPAD_DOWN;
                 } else if (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT ||
                            e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) {
+                    bool right = e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT;
+                    static bool trig_on[2];
+                    bool on = e.caxis.value > 16000;
                     if (app.mode() == M::Search && !app.menu_open())
-                        app.kb_trigger(e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT, e.caxis.value);
+                        app.kb_trigger(right, e.caxis.value);
+                    else if (on && !trig_on[right])
+                        app.trigger(right);   // DESIGN 7.7: chapters in the player, a page in lists
+                    trig_on[right] = on;
                     continue;
                 } else continue;
                 int v = e.caxis.value, prev = *st;

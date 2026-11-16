@@ -264,5 +264,12 @@
   "KidsWall": "YouTube ไม่ให้เล่นคลิปสำหรับเด็กต่อจากตรงนี้",
   "QuitAsk": "ออกจาก YouTube ไหม",
   "QuitLeave": "ออก",
-  "QuitStay": "อยู่ต่อ"
+  "QuitStay": "อยู่ต่อ",
+  "HintPrevNext": "คลิปก่อน/ถัดไป",
+  "HintCaptions": "คำบรรยาย",
+  "AutoplayDesc": "จบคลิปแล้วเล่นคลิปถัดไป",
+  "CcToastOff": "คำบรรยาย: ปิด",
+  "CcToastOn": "คำบรรยาย: ",
+  "CcToastNone": "คลิปนี้ไม่มีคำบรรยาย",
+  "FirstClip": "นี่คือคลิปแรกแล้ว"
 }

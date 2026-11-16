@@ -159,6 +159,7 @@ void App::render_options_sheet(gfx::Renderer& rn) {
             case MenuAction::AddSearchToFeed: ic = "plus"; col = 0x30D158; break;
             case MenuAction::PlayPostVideo: ic = "play"; col = 0xFF0033; break;
             case MenuAction::CycleSpeed: ic = "speed"; col = 0x64D2FF; break;
+            case MenuAction::ToggleAutoplay: ic = "repeat"; col = 0x30D158; break;
             default: break;
         }
         if (danger) col = 0xFF453A;
@@ -170,13 +171,21 @@ void App::render_options_sheet(gfx::Renderer& rn) {
         } else rn.round_rect(r, 22 * u, kSurf2);
         bos_icon(rn, ic, r.x + 22 * u, r.y + (th - 30 * u) / 2, 30 * u, icol);
         std::string label = it.label;
+        float lend = r.x + r.w - 20 * u;
         if (is_value_action(it.action)) {
             std::string l, v;
             split_value(label, l, v);
-            label = l + "  " + v;
+            bool on = v == i18n::tr(S::On), off = v == i18n::tr(S::Off);
+            if (on || off) {   // a switch 64x38 at the right: on = primary, the knob right
+                gfx::Rect sw{r.x + r.w - 20 * u - 64 * u, r.y + (th - 38 * u) / 2, 64 * u, 38 * u};
+                rn.round_rect(sw, 19 * u, on ? bos_.primary : gfx::Color::rgb(0x39393D));
+                rn.round_rect({on ? sw.x + sw.w - 34 * u : sw.x + 4 * u, sw.y + 4 * u, 30 * u, 30 * u}, 15 * u, kWhite);
+                label = l;
+                lend = sw.x - 12 * u;
+            } else label = l + "  " + v;
         }
         float lx = r.x + 22 * u + 30 * u + 16 * u;
-        rn.text(f, f.ellipsize(label, r.x + r.w - 20 * u - lx), lx, r.y + (th - f.line_height()) / 2, tc);
+        rn.text(f, f.ellipsize(label, lend - lx), lx, r.y + (th - f.line_height()) / 2, tc);
     }
     bool val = menu_sel_ < n && is_value_action(menu_items_[menu_sel_].action);
     design_hint_bar(rn, {{"A", i18n::tr(S::HintSelect)}, {"B", i18n::tr(S::HintClose)}},

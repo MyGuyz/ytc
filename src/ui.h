@@ -139,7 +139,9 @@ public:
     void on_resize();                   // re-bake fonts for the new window height
     void toggle_view();                 // cycle browse view (Grid -> Carousel -> 3D -> Coverflow)
     void cycle_tab(int dir);            // L/R shoulders: switch channel/Home tab
-    void seek_chapter(int dir);          // L/R shoulders while playing: previous/next chapter
+    void seek_chapter(int dir);          // L2/R2 while playing: previous/next chapter (none: -/+30 s)
+    bool player_pad(int sdl_button);     // DESIGN 7.7: L1/R1 clip, X captions, START hide (player, Shorts)
+    void trigger(bool right);            // L2/R2 pressed: chapters in the player, a page in lists
     enum class ViewMode { Grid, Carousel, Carousel3D, Coverflow, Shelves };
     bool in_subview() const { return in_channel_view_; }   // channel/playlist view active?
     bool menu_open() const { return menu_open_; }
@@ -774,6 +776,19 @@ private:
     int quit_prompt_sel_ = 0;
     void render_quit_prompt(gfx::Renderer& rn);
     double stall_pos_ = 0; unsigned stall_since_ = 0; bool stall_moved_ = false;  // made-for-kids wall
+    // DESIGN 7.7: the "next" row (Down in the player); 7.8: Shorts mode
+    bool upnext_open_ = false; int upnext_sel_ = 0; std::vector<int> upnext_idx_;
+    bool shorts_mode_ = false; unsigned shorts_anim_at_ = 0; int shorts_anim_dir_ = 0;
+    std::string shorts_prev_thumb_; int cc_last_ = 0;
+    int neighbour_index(int dir) const;
+    void play_neighbour(int dir);
+    void toggle_captions();
+    void open_upnext();
+    void render_upnext(gfx::Renderer& rn);
+    void render_shorts(gfx::Renderer& rn, double pos, double dur, float alpha);
+    void render_shorts_loading(gfx::Renderer& rn);
+    void shorts_column(gfx::Renderer& rn, const yt::SearchResult& v, float alpha);
+    std::vector<int> shorts_list() const;
     int  resume_prompt_sel_ = 0;               // 0 = Resume, 1 = Start over
     double resume_prompt_pos_ = 0;
     yt::SearchResult resume_prompt_item_;
@@ -803,6 +818,10 @@ private:
     std::string sugg_res_q_;
     std::vector<std::string> sugg_res_;
     int trig_l_ = 0, trig_r_ = 0;
+    bool kb_caps_ = false;              // L1 twice quickly: caps lock until L1 again
+    unsigned kb_l1_at_ = 0, kb_trig_at_ = 0, kb_trig_last_ = 0; int kb_trig_dir_ = 0;
+    void kb_caret_step(int dir);
+    void kb_tick();                     // L2/R2 held: the caret repeats
     void pump_suggestions();
     // Brick OS DESIGN.md: its fonts (Inter + the Thai font at em px, 768-high screen) and pieces
     enum DZ { DZ_STATUS, DZ_PCT, DZ_ROW, DZ_CARD, DZ_META, DZ_CHIP, DZ_CHIP_SEL, DZ_PILL, DZ_HINT, DZ_HINTKEY,

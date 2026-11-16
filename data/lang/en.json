@@ -264,5 +264,12 @@
   "KidsWall": "YouTube stops made-for-kids videos here in this app",
   "QuitAsk": "Leave YouTube?",
   "QuitLeave": "Leave",
-  "QuitStay": "Stay"
+  "QuitStay": "Stay",
+  "HintPrevNext": "Prev/next clip",
+  "HintCaptions": "Captions",
+  "AutoplayDesc": "Play the next clip when one ends",
+  "CcToastOff": "Captions: off",
+  "CcToastOn": "Captions: ",
+  "CcToastNone": "This clip has no captions",
+  "FirstClip": "This is the first clip"
 }

@@ -86,6 +86,7 @@ enum class Str {
     HintTab, Unfollow,
     HintRemove, HintSeek, HintVolume, HintStopCast,
     KidsPartial, KidsWall, QuitAsk, QuitLeave, QuitStay,
+    HintPrevNext, HintCaptions, AutoplayDesc, CcToastOff, CcToastOn, CcToastNone, FirstClip,
     COUNT
 };
 

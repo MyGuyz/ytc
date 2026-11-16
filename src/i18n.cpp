@@ -74,6 +74,7 @@ const char* kKeys[(int)Str::COUNT] = {
     "HintTab","Unfollow",
     "HintRemove","HintSeek","HintVolume","HintStopCast",
     "KidsPartial","KidsWall","QuitAsk","QuitLeave","QuitStay",
+    "HintPrevNext","HintCaptions","AutoplayDesc","CcToastOff","CcToastOn","CcToastNone","FirstClip",
 };
 
 // English is baked in — the source strings AND the ultimate fallback, so the UI is

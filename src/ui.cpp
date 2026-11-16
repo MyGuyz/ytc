@@ -2485,6 +2485,9 @@ void App::open_menu() {
         // the menu gets opened mid-video.
         if (mode_ == Mode::Playing)
             menu_items_.push_back({tr(S::SetPlaybackMenu), MenuAction::GoPlayback});
+        if (mode_ == Mode::Playing)   // DESIGN 7.8: one switch, the same as Settings > Playback
+            menu_items_.push_back({tr(S::SetAutoplay) + std::string(":  ") + tr(autoplay_ ? S::On : S::Off),
+                                   MenuAction::ToggleAutoplay});
         // collect
         bool wl = wl_ids_.count(t.video_id) > 0;
         menu_items_.push_back({tr(wl ? S::RemoveWatchLater : S::AddWatchLater),
@@ -2805,6 +2808,8 @@ void App::menu_activate() {
         case MenuAction::ToggleSponsorBlock:
         case MenuAction::CycleCaptions:
         case MenuAction::ToggleAutoplay:
+            if (menu_kind_ == MenuKind::Context) adjust_setting(MenuAction::ToggleAutoplay, 1);   // a tile: A flips it
+            return;
         case MenuAction::ToggleFeedFavorites:
         case MenuAction::ToggleFeedHistory:
         case MenuAction::ToggleFeedCustom:
@@ -3595,8 +3600,27 @@ void App::input(Action a) {
         return;
     }
     if (mode_ == Mode::Playing) {
-        // DESIGN 7.5: X hides the overlay, Y opens the comments
-        if (a == Action::Sort) { controls_until_ = 0; return; }
+        // DESIGN 7.7: X captions, Y comments; the "next" row takes the keys while it is open
+        if (upnext_open_) {
+            int n = (int)upnext_idx_.size();
+            switch (a) {
+                case Action::Left:  if (n) wrap_step(upnext_sel_, n, -1); break;
+                case Action::Right: if (n) wrap_step(upnext_sel_, n, 1); break;
+                case Action::Select:
+                    if (upnext_sel_ < n && !resolve_running_) {
+                        int i = upnext_idx_[upnext_sel_];
+                        upnext_open_ = false;
+                        save_resume_position(); player_.stop(); has_pending_seek_ = false; pending_seek_ = 0;
+                        sel_ = i;
+                        play_item(results_[i], i);
+                    }
+                    break;
+                case Action::Back: case Action::Up: case Action::Down: upnext_open_ = false; break;
+                default: break;
+            }
+            return;
+        }
+        if (a == Action::Sort) { toggle_captions(); return; }
         if (a == Action::Search) {
             if (!player_.paused()) { player_.set_pause(true); comments_paused_ = true; }
             open_comments(now_playing_item_);
@@ -3606,15 +3630,16 @@ void App::input(Action a) {
         switch (a) {
             case Action::Select: player_.toggle_pause(); break;
             case Action::Menu:   open_menu(); break;   // options for the playing video
-            case Action::Back:   save_resume_position(); player_.stop(); mode_ = Mode::Grid; break;
+            case Action::Back:   save_resume_position(); player_.stop(); mode_ = Mode::Grid;
+                                 shorts_mode_ = false; break;
             // Accumulate seeks; the actual seek fires from pump_async once the presses
             // settle (debounce). Rapid taps => one seek, not a burst of range requests.
             case Action::Left:   pending_seek_ -= 10; has_pending_seek_ = true;
                                  pending_seek_at_ = SDL_GetTicks(); break;
             case Action::Right:  pending_seek_ += 10; has_pending_seek_ = true;
                                  pending_seek_at_ = SDL_GetTicks(); break;
-            case Action::Up:     adjust_volume(+5); break;   // app-local volume
-            case Action::Down:   adjust_volume(-5); break;
+            case Action::Up:     if (shorts_mode_) play_neighbour(-1); break;   // DESIGN 7.7: shows the controls
+            case Action::Down:   if (shorts_mode_) play_neighbour(+1); else open_upnext(); break;
             default: break;
         }
         return;
@@ -3622,7 +3647,8 @@ void App::input(Action a) {
     if (mode_ == Mode::Loading) {
         // Back cancels the pending resolve (poll_resolve discards a late result
         // once mode has left Loading); the worker still finishes in the bg.
-        if (a == Action::Back) { mode_ = Mode::Grid; status_msg_ = i18n::tr(i18n::Str::Cancelled); }
+        if (a == Action::Back) { mode_ = Mode::Grid; shorts_mode_ = false;
+                                 status_msg_ = i18n::tr(i18n::Str::Cancelled); }
         return;
     }
     if (mode_ == Mode::Search) {
@@ -3765,6 +3791,7 @@ static std::string sb_category_label(const std::string& c) {
 }
 
 void App::pump_async() {
+    kb_tick();
     pump_suggestions();
     // Screen-off listening (Brick OS): flag "a video is playing" for the power button
     // handler, and play audio only while it has the screen off.
@@ -3966,8 +3993,12 @@ void App::cycle_tab(int dir) {
 }
 
 void App::seek_chapter(int dir) {
-    if (mode_ != Mode::Playing || menu_open_ || desc_open_ ||
-        now_playing_chapters_.empty() || dir == 0) return;
+    if (mode_ != Mode::Playing || menu_open_ || desc_open_ || dir == 0) return;
+    if (now_playing_chapters_.empty()) {   // DESIGN 7.7: no chapters, L2/R2 jump 30 s
+        pending_seek_ += 30 * dir; has_pending_seek_ = true;
+        pending_seek_at_ = SDL_GetTicks(); controls_until_ = pending_seek_at_ + 2600;
+        return;
+    }
 
     // Include the pending scrub target so quick repeated shoulder presses can cross
     // several chapters before the existing seek debounce fires.
@@ -3997,6 +4028,115 @@ void App::seek_chapter(int dir) {
     controls_until_ = pending_seek_at_ + 2600;
 }
 
+// ---------- DESIGN 7.7 / 7.8 ----------
+// Controller buttons the player owns (before the browse mapping). False: not handled here.
+bool App::player_pad(int b) {
+    bool shorts_loading = mode_ == Mode::Loading && shorts_mode_;
+    if ((mode_ != Mode::Playing && !shorts_loading) || menu_open_ || desc_open_ || comments_open_ ||
+        resume_prompt_open_ || quit_prompt_open_ || casting_ || cast_picker_open_)
+        return false;
+    if (shorts_loading) return b == SDL_CONTROLLER_BUTTON_LEFTSHOULDER || b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER ||
+                               b == SDL_CONTROLLER_BUTTON_START || b == SDL_CONTROLLER_BUTTON_X;   // wait for it
+    switch (b) {
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  upnext_open_ = false; play_neighbour(-1); return true;
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: upnext_open_ = false; play_neighbour(+1); return true;
+        case SDL_CONTROLLER_BUTTON_START:         controls_until_ = 0; upnext_open_ = false; return true;
+        default: return false;
+    }
+}
+
+// L2/R2 pressed (an edge, not the axis): the player's chapters, a page of a list
+void App::trigger(bool right) {
+    if (menu_open_ || desc_open_ || comments_open_ || resume_prompt_open_ || quit_prompt_open_ || casting_ ||
+        cast_picker_open_)
+        return;
+    if (mode_ == Mode::Playing) {
+        if (!shorts_mode_ && !upnext_open_) seek_chapter(right ? +1 : -1);
+        return;
+    }
+    if (mode_ != Mode::Grid) return;
+    held_ = true;   // a page: three rows, stopping at the ends (no wrap)
+    for (int k = 0; k < 3; ++k) input(right ? Action::Down : Action::Up);
+    held_ = false;
+}
+
+// The playable clip next to the playing one in the list (Shorts mode: the next Short), or -1
+int App::neighbour_index(int dir) const {
+    if (now_playing_index_ < 0) return -1;
+    for (int i = now_playing_index_ + dir; i >= 0 && i < (int)results_.size(); i += dir) {
+        const yt::SearchResult& v = results_[i];
+        if (v.video_id.empty() || v.is_channel() || v.is_playlist() || v.is_post()) continue;
+        if (shorts_mode_ && !v.is_short) continue;
+        return i;
+    }
+    return -1;
+}
+
+void App::play_neighbour(int dir) {
+    if (resolve_running_ || mode_ != Mode::Playing) return;
+    int i = neighbour_index(dir);
+    if (i < 0) {
+        if (dir > 0 && !shorts_mode_ && !now_playing_item_.video_id.empty()) {   // end of the list: related
+            save_resume_position(); player_.stop(); has_pending_seek_ = false; pending_seek_ = 0;
+            start_related_autoplay(now_playing_item_.video_id);
+            return;
+        }
+        status_msg_ = i18n::tr(dir < 0 ? i18n::Str::FirstClip
+                                       : (more_running_ || home_more_running_) ? i18n::Str::FindingNext
+                                                                               : i18n::Str::NoMoreVideos);
+        status_until_ = SDL_GetTicks() + 2000;
+        return;
+    }
+    save_resume_position(); player_.stop(); has_pending_seek_ = false; pending_seek_ = 0;
+    if (shorts_mode_) {
+        shorts_anim_dir_ = dir; shorts_anim_at_ = SDL_GetTicks();
+        shorts_prev_thumb_ = now_playing_item_.thumbnail_url;
+    }
+    sel_ = i;   // B lands on it; near the end of the list this pages more in (maybe_load_more)
+    play_item(results_[i], i);
+}
+
+// X in the player: captions off, or back on (the last track, else the first)
+void App::toggle_captions() {
+    controls_until_ = SDL_GetTicks() + 2600;
+    int n = (int)cc_tracks_.size();
+    if (n == 0) {
+        status_msg_ = i18n::tr(i18n::Str::CcToastNone); status_until_ = SDL_GetTicks() + 2000;
+        return;
+    }
+    if (cc_sel_ > 0) { cc_last_ = cc_sel_; cc_sel_ = 0; }
+    else cc_sel_ = cc_last_ > 0 && cc_last_ <= n ? cc_last_ : 1;
+    apply_caption_selection();
+    status_msg_ = cc_sel_ > 0 ? std::string(i18n::tr(i18n::Str::CcToastOn)) + cc_tracks_[cc_sel_ - 1].name
+                              : std::string(i18n::tr(i18n::Str::CcToastOff));
+    status_until_ = SDL_GetTicks() + 2000;
+}
+
+// Down in the player: the next clips of the list in a row from the bottom
+void App::open_upnext() {
+    upnext_idx_.clear();
+    for (int i = now_playing_index_ < 0 ? (int)results_.size() : now_playing_index_ + 1;
+         i < (int)results_.size() && upnext_idx_.size() < 10; ++i) {
+        const yt::SearchResult& v = results_[i];
+        if (v.video_id.empty() || v.is_channel() || v.is_playlist() || v.is_post()) continue;
+        upnext_idx_.push_back(i);
+    }
+    if (upnext_idx_.empty()) {
+        status_msg_ = i18n::tr(i18n::Str::NoMoreVideos); status_until_ = SDL_GetTicks() + 2000;
+        return;
+    }
+    upnext_sel_ = 0;
+    upnext_open_ = true;
+    controls_until_ = 0;
+}
+
+std::vector<int> App::shorts_list() const {
+    std::vector<int> r;
+    for (int i = 0; i < (int)results_.size(); ++i)
+        if (results_[i].is_short && !results_[i].video_id.empty()) r.push_back(i);
+    return r;
+}
+
 void App::render(gfx::Renderer& rn) {
     if (mode_ == Mode::Playing)      render_player(rn);
     else if (mode_ == Mode::Search)  render_search(rn);
@@ -4008,7 +4148,8 @@ void App::render(gfx::Renderer& rn) {
             case ViewMode::Shelves:    render_shelves(rn); break;
             default:                   render_grid(rn); break;
         }
-        if (mode_ == Mode::Loading) render_loading(rn);
+        if (mode_ == Mode::Loading && shorts_mode_) render_shorts_loading(rn);
+        else if (mode_ == Mode::Loading) render_loading(rn);
     }
     if (menu_open_) render_menu(rn);   // overlay on top of whatever view
     if (desc_open_) render_description(rn);   // description floats above everything
@@ -4435,7 +4576,9 @@ void App::render_player(gfx::Renderer& rn) {
     else if (remain >= (long)kFadeMs) alpha = 1.f;
     else alpha = (float)remain / (float)kFadeMs;    // fade tail
 
-    if (alpha > 0.001f) player_overlay(rn, pos, dur, alpha);   // DESIGN 7.5 (ui_bos_player.cpp)
+    if (shorts_mode_) render_shorts(rn, pos, dur, alpha);       // DESIGN 7.8 (ui_bos_player.cpp)
+    else if (upnext_open_) render_upnext(rn);                    // DESIGN 7.7
+    else if (alpha > 0.001f) player_overlay(rn, pos, dur, alpha);   // DESIGN 7.5 (ui_bos_player.cpp)
 
     // Stats for nerds — top-left overlay, always visible while enabled.
     if (stats_for_nerds_) {
@@ -4475,7 +4618,7 @@ void App::open_search() {
     kb_placeholder_.clear();
     query_input_ = query_;      // seed with the current query for quick edits
     kb_caret_ = (int)query_input_.size();
-    kb_shift_ = false;
+    kb_shift_ = kb_caps_ = false;
     kb_row_ = 1; kb_col_ = 0;   // start on 'q'
     status_msg_.clear();
     sugg_.clear(); sugg_focus_ = false; sugg_col_ = 0;
@@ -4510,11 +4653,11 @@ void App::kb_activate() {
             std::string t = k.text ? std::string(k.text) : std::string(1, k.ch);
             query_input_.insert((size_t)kb_caret_, t);
             kb_caret_ += (int)t.size();
-            kb_shift_ = false;                       // one-shot capital (Thai: one-shot SHIFT layer)
+            if (!kb_caps_) kb_shift_ = false;        // one-shot capital (Thai: one-shot SHIFT layer); caps lock stays
             break;
         }
-        case KLANG:   kb_thai_ = !kb_thai_; kb_shift_ = kb_sym_ = false; break;
-        case KSYM:    kb_sym_ = !kb_sym_; kb_shift_ = false; break;
+        case KLANG:   kb_thai_ = !kb_thai_; kb_shift_ = kb_sym_ = kb_caps_ = false; break;
+        case KSYM:    kb_sym_ = !kb_sym_; kb_shift_ = kb_caps_ = false; break;
         case KSPACE:  query_input_.insert(query_input_.begin() + kb_caret_, ' '); kb_caret_++; break;
         case KDEL:    backspace(); break;
         case KLEFT:   while (kb_caret_ > 0 && ((unsigned char)query_input_[--kb_caret_] & 0xC0) == 0x80) {} break;
@@ -4524,7 +4667,7 @@ void App::kb_activate() {
                                  ((unsigned char)query_input_[kb_caret_] & 0xC0) == 0x80) kb_caret_++;
                       }
                       break;
-        case KSHIFT:  kb_shift_ = !kb_shift_; kb_sym_ = false; break;
+        case KSHIFT:  kb_shift_ = !kb_shift_; kb_caps_ = false; kb_sym_ = false; break;
         case KSUBMIT: submit_search(); break;
     }
 }
@@ -4678,7 +4821,8 @@ void App::render_search(gfx::Renderer& rn) {
             if (sel != (pass == 1)) { x += kw + gap; continue; }
             gfx::Rect kr{x, ky, kw, keyh};
             if (sel) kr = {x - kw * 0.04f, ky - keyh * 0.04f, kw * 1.08f, keyh * 1.08f};
-            gfx::Color bg = sel ? bos_.focus : k.type == KSUBMIT ? bos_.primary : surf2;
+            bool caps_key = k.type == KSHIFT && kb_caps_;   // caps lock: the shift key filled
+            gfx::Color bg = sel ? bos_.focus : (k.type == KSUBMIT || caps_key) ? bos_.primary : surf2;
             rn.round_rect(kr, 14*u, bg);
             std::string lbl = k.label; const gfx::Font* f = &dz(DZ_KEY);
             gfx::Color tc = sel ? bos_.onfocus : dzc::white;
@@ -4695,7 +4839,7 @@ void App::render_search(gfx::Renderer& rn) {
                     break;
                 default: break;
             }
-            if (k.type == KSHIFT && kb_shift_ && !sel) tc = bos_.primary;
+            if (k.type == KSHIFT && kb_shift_ && !sel) tc = kb_caps_ ? bos_.onprimary : bos_.primary;
             if (f->text_width(lbl) > kr.w - 8*u) f = &dz(DZ_KBTN);
             // a lone Thai mark sits where it would on a consonant: pull it to the key centre
             float my = 0;
@@ -4737,12 +4881,19 @@ bool App::kb_pad(int b) {
             query_input_.insert(query_input_.begin() + kb_caret_, ' '); kb_caret_++;
             return true;
         case SDL_CONTROLLER_BUTTON_Y:
-            if (!kb_numeric()) { kb_thai_ = !kb_thai_; kb_shift_ = kb_sym_ = false; kb_clamp(); }
+            if (!kb_numeric()) { kb_thai_ = !kb_thai_; kb_shift_ = kb_sym_ = kb_caps_ = false; kb_clamp(); }
             return true;
-        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:
-            if (!kb_numeric()) { kb_shift_ = !kb_shift_; kb_sym_ = false; kb_clamp(); }
+        case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: {   // one-shot shift; twice quickly = caps lock; again = off
+            if (kb_numeric()) return true;
+            unsigned now = SDL_GetTicks();
+            if (kb_caps_) kb_caps_ = kb_shift_ = false;
+            else if (kb_shift_ && now - kb_l1_at_ < 400) kb_caps_ = true;
+            else kb_shift_ = !kb_shift_;
+            kb_l1_at_ = now; kb_sym_ = false; kb_clamp();
             return true;
-        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:
+        }
+        case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER:   // the #+= page / back to abc
+            if (!kb_numeric()) { kb_sym_ = !kb_sym_; kb_shift_ = kb_caps_ = false; kb_clamp(); }
             return true;
         case SDL_CONTROLLER_BUTTON_START:
             submit_search();
@@ -4760,12 +4911,24 @@ void App::kb_trigger(bool right, int v) {
     int now = v > 16000 ? 1 : (v < 8000 ? 0 : st);
     if (now == st) return;
     st = now;
-    if (!now) return;
-    if (!right) { while (kb_caret_ > 0 && ((unsigned char)query_input_[--kb_caret_] & 0xC0) == 0x80) {} }
+    if (!now) { if (kb_trig_dir_ == (right ? 1 : -1)) kb_trig_dir_ = 0; return; }
+    kb_trig_dir_ = right ? 1 : -1;
+    kb_trig_at_ = kb_trig_last_ = SDL_GetTicks();
+    kb_caret_step(kb_trig_dir_);
+}
+void App::kb_caret_step(int dir) {
+    if (dir < 0) { while (kb_caret_ > 0 && ((unsigned char)query_input_[--kb_caret_] & 0xC0) == 0x80) {} }
     else if (kb_caret_ < (int)query_input_.size()) {
         kb_caret_++;
         while (kb_caret_ < (int)query_input_.size() && ((unsigned char)query_input_[kb_caret_] & 0xC0) == 0x80) kb_caret_++;
     }
+}
+// L2/R2 held: after 400 ms the caret moves every 60 ms
+void App::kb_tick() {
+    if (!kb_trig_dir_) return;
+    if (mode_ != Mode::Search) { kb_trig_dir_ = 0; return; }
+    unsigned now = SDL_GetTicks();
+    if (now - kb_trig_at_ > 400 && now - kb_trig_last_ >= 60) { kb_caret_step(kb_trig_dir_); kb_trig_last_ = now; }
 }
 
 // Autocomplete: 250 ms after the query stops changing, ask YouTube's suggest endpoint
@@ -4819,6 +4982,7 @@ void App::pump_suggestions() {
 void App::request_playback() {
     const yt::SearchResult* v = selected();
     if (!v || v->video_id.empty()) return;   // only videos are playable
+    shorts_mode_ = v->is_short; shorts_anim_at_ = 0; upnext_open_ = false;
     now_playing_item_ = *v;                      // context for the player options menu
     now_playing_index_ = sel_;                   // remember list position (for autoplay)
     stats_for_nerds_ = false;                    // per-video: reset for each new video
@@ -4854,6 +5018,7 @@ void App::test_end_playback(int idx) {
 
 // Launch a specific video (autoplay path) without the resume prompt.
 void App::play_item(const yt::SearchResult& v, int index) {
+    shorts_mode_ = v.is_short; upnext_open_ = false;
     now_playing_item_ = v;
     now_playing_index_ = index;
     stats_for_nerds_ = false;
@@ -4875,6 +5040,15 @@ void App::handle_playback_ended() {
         it_.clear_resume_pos(now_playing_item_.video_id);   // finished -> forget resume
     player_.stop();
     has_pending_seek_ = false; pending_seek_ = 0;
+    if (shorts_mode_ && mode_ == Mode::Playing) {   // DESIGN 7.8: on -> the next Short, off -> this one again
+        int i = autoplay_ ? neighbour_index(+1) : now_playing_index_;
+        if (autoplay_ && i < 0) { mode_ = Mode::Grid; shorts_mode_ = false; return; }
+        if (autoplay_) { shorts_anim_dir_ = 1; shorts_anim_at_ = SDL_GetTicks();
+                         shorts_prev_thumb_ = now_playing_item_.thumbnail_url; sel_ = i;
+                         play_item(results_[i], i); }
+        else { shorts_anim_at_ = 0; play_item(now_playing_item_, now_playing_index_); }
+        return;
+    }
     if (!autoplay_) { mode_ = Mode::Grid; return; }
     int idx = find_next_playable(now_playing_index_);
     if (idx >= 0) { arm_upnext(results_[idx], idx); return; }  // next in the current list
