@@ -2372,11 +2372,11 @@ void App::render_description(gfx::Renderer& rn) {
     if (post_has_video_) {   // a post's video: a thumbnail (A plays it), the ring when focused
         float tw = std::min(wrap_w, 320*u), th = tw * 9.f / 16.f;
         gfx::Rect vr{tx, body_top + 8*u, tw, th};
-        if (post_focus_ == vid_idx) design_ring(rn, vr, 18*u);
         rn.quad(vr, gfx::Color::rgb(0x2C2C30));
         gfx::Texture* vt = post_thumb_url_.empty() ? nullptr : thumbs_.get(post_thumb_url_);
         if (vt) rn.textured_cover(vr, *vt, {1, 1, 1, 1});
         rn.round_corners(vr, 18*u, gfx::Color::rgb(0x1C1C1F));
+        if (post_focus_ == vid_idx) design_ring(rn, vr, 18*u);
         body_top = vr.y + vr.h + 20*u;
     }
     if (has_comments_btn) {   // a tile: Comments

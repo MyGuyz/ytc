@@ -96,8 +96,8 @@ void App::design_card(gfx::Renderer& rn, int i, float x, float ty, float cardw, 
     const yt::SearchResult& v = results_[i];
     gfx::Rect tr = foc ? gfx::Rect{x - cardw * 0.02f, ty - thumbh * 0.02f, cardw * 1.04f, thumbh * 1.04f}
                        : gfx::Rect{x, ty, cardw, thumbh};
-    if (foc) design_ring(rn, tr, rad);
     design_thumb(rn, v, tr, rad, 1.f);
+    if (foc) design_ring(rn, tr, rad);
     const gfx::Font &cf = dz(DZ_CARD), &tf = dz(foc ? DZ_CARD_FOC : DZ_CARD), &mf = dz(DZ_META);
     std::string title = v.is_post() ? v.title.substr(0, v.title.find('\n')) : v.title;
     float ly = ty + thumbh + 12 * u;
@@ -349,8 +349,8 @@ void App::render_carousel(gfx::Renderer& rn) {
             float w = bw * sc, h = bh * sc;
             gfx::Rect r{cx + d * step - w / 2, cy - h / 2, w, h};
             bool foc = i == sel_ && dist < 0.5f && !tab_focus_;
-            if (foc) design_ring(rn, r, 18 * u);
             design_thumb(rn, results_[i], r, 18 * u * sc, a);
+            if (foc) design_ring(rn, r, 18 * u);
         }
         design_center_meta(rn, cy + bh / 2 + 32 * u);
     }
@@ -381,8 +381,8 @@ void App::render_carousel3d(gfx::Renderer& rn) {
             float alpha = std::max(0.25f, 1.f - dist * 0.24f);
             if (dist < 0.12f) {
                 gfx::Rect r{x - hw, cy - hh, hw * 2, hh * 2};
-                if (!tab_focus_) design_ring(rn, r, 18 * u);
                 design_thumb(rn, results_[i], r, 18 * u, 1.f);
+                if (!tab_focus_) design_ring(rn, r, 18 * u);
                 continue;
             }
             float ang = std::max(-kMaxAng, std::min(kMaxAng, d)) * 0.9f;
@@ -425,8 +425,8 @@ void App::render_coverflow(gfx::Renderer& rn) {
             float alpha = std::max(0.28f, 1.f - 0.10f * slide - 0.18f * std::min(extra, 4.f));
             if (ad < 0.10f) {
                 gfx::Rect r{x - hw, cy - hh, hw * 2, hh * 2};
-                if (!tab_focus_) design_ring(rn, r, 18 * u);
                 design_thumb(rn, results_[i], r, 18 * u, 1.f);
+                if (!tab_focus_) design_ring(rn, r, 18 * u);
                 continue;
             }
             float cosA = std::cos(ang), sinA = std::sin(ang), persp = 0.35f;
