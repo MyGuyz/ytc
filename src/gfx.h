@@ -132,6 +132,8 @@ public:
     // Paint the corners of r OUTSIDE a radius in `outside`: rounds an image already
     // drawn over a solid background. corners: 1 TL, 2 TR, 4 BR, 8 BL.
     void round_corners(const Rect& r, float radius, Color outside, int corners = 15);
+    // A rounded outline: `thickness` wide just inside r, smooth edges at any size (no overpaint).
+    void ring(const Rect& r, float radius, float thickness, Color c);
     void end();                            // flush
 private:
     void corner(const Rect& r, float radius, int which, const Texture& t, Color c);
@@ -143,6 +145,8 @@ private:
     std::vector<V> verts_;
     unsigned prog_ = 0, vbo_ = 0, white_ = 0, cur_tex_ = 0;
     int u_proj_ = -1;
+    unsigned ring_prog_ = 0;
+    int ur_proj_ = -1, ur_half_ = -1, ur_rad_ = -1, ur_th_ = -1;
     int fb_w_ = 0, fb_h_ = 0;
 };
 

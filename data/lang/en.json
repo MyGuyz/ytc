@@ -259,5 +259,10 @@
   "HintRemove": "Remove",
   "HintSeek": "Seek",
   "HintVolume": "Volume",
-  "HintStopCast": "Stop casting"
+  "HintStopCast": "Stop casting",
+  "KidsPartial": "Made for kids: YouTube lets this app play only the start",
+  "KidsWall": "YouTube stops made-for-kids videos here in this app",
+  "QuitAsk": "Leave YouTube?",
+  "QuitLeave": "Leave",
+  "QuitStay": "Stay"
 }

@@ -205,8 +205,7 @@ void App::design_toast(gfx::Renderer& rn) {
 // §4 pictures: a 4 px ring in the focus colour outside a 4 px gap
 void App::design_ring(gfx::Renderer& rn, const gfx::Rect& r, float radius) {
     const float u = win_->height() / 768.f;
-    rn.round_rect({r.x - 8 * u, r.y - 8 * u, r.w + 16 * u, r.h + 16 * u}, radius + 8 * u, bos_.focus);
-    rn.round_rect({r.x - 4 * u, r.y - 4 * u, r.w + 8 * u, r.h + 8 * u}, radius + 4 * u, kBg);
+    rn.ring({r.x - 8 * u, r.y - 8 * u, r.w + 16 * u, r.h + 16 * u}, radius + 8 * u, 4 * u, bos_.focus);
 }
 
 // §7.5 drawer: 380 wide from the left over the page at 60 % black, rows 72 (icon 30, name 30/600)

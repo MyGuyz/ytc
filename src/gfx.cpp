@@ -400,6 +400,27 @@ Renderer::Renderer() {
     glLinkProgram(prog_);
     glDeleteShader(v); glDeleteShader(f);
     u_proj_ = glGetUniformLocation(prog_, "uProj");
+    {   // the ring: aUV carries the pixel offset from the rect's centre; coverage from the rounded-box distance
+        std::string rfs = std::string(VER) + PREC +
+            " varying vec2 vUV; varying vec4 vCol;"
+            "uniform vec2 uHalf; uniform float uRad; uniform float uTh;"
+            "void main(){ vec2 q = abs(vUV) - uHalf + vec2(uRad);"
+            " float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uRad;"
+            " float a = clamp(0.5 - d, 0.0, 1.0) - clamp(0.5 - d - uTh, 0.0, 1.0);"
+            " gl_FragColor = vec4(vCol.rgb, vCol.a * a); }";
+        ring_prog_ = glCreateProgram();
+        unsigned rv = compile(GL_VERTEX_SHADER, vs.c_str()), rf = compile(GL_FRAGMENT_SHADER, rfs.c_str());
+        glAttachShader(ring_prog_, rv); glAttachShader(ring_prog_, rf);
+        glBindAttribLocation(ring_prog_, 0, "aPos");
+        glBindAttribLocation(ring_prog_, 1, "aUV");
+        glBindAttribLocation(ring_prog_, 2, "aCol");
+        glLinkProgram(ring_prog_);
+        glDeleteShader(rv); glDeleteShader(rf);
+        ur_proj_ = glGetUniformLocation(ring_prog_, "uProj");
+        ur_half_ = glGetUniformLocation(ring_prog_, "uHalf");
+        ur_rad_ = glGetUniformLocation(ring_prog_, "uRad");
+        ur_th_ = glGetUniformLocation(ring_prog_, "uTh");
+    }
     glGenBuffers(1, &vbo_);
     uint8_t white[4] = {255,255,255,255};
     glGenTextures(1, &white_);
@@ -423,11 +444,17 @@ Renderer::Renderer() {
         }
     disc_ = Texture::from_rgba(disc.data(), 128, 128);
     notch_ = Texture::from_rgba(notch.data(), 128, 128);
+    for (Texture* t : {disc_.get(), notch_.get()}) {   // small corners sample a shrunk level: no stair steps
+        glBindTexture(GL_TEXTURE_2D, t->id());
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    }
 }
 Renderer::~Renderer() {
     if (vbo_) glDeleteBuffers(1, &vbo_);
     if (white_) glDeleteTextures(1, &white_);
     if (prog_) glDeleteProgram(prog_);
+    if (ring_prog_) glDeleteProgram(ring_prog_);
 }
 void Renderer::begin(int fb_w, int fb_h) {
     fb_w_ = fb_w; fb_h_ = fb_h;
@@ -499,6 +526,29 @@ void Renderer::round_rect(const Rect& r, float rad, Color c) {
     quad({r.x + r.w - rad, r.y + rad, rad, r.h - 2*rad}, c);
     for (int k = 0; k < 4; ++k) corner(r, rad, k, *disc_, c);
 }
+void Renderer::ring(const Rect& r, float rad, float th, Color c) {
+    rad = std::min(rad, std::min(r.w, r.h) / 2);
+    flush();
+    const float hw = r.w / 2, hh = r.h / 2, cx = r.x + hw, cy = r.y + hh, m = 1;   // 1 px margin for the AA edge
+    V v[6] = {{cx - hw - m, cy - hh - m, -hw - m, -hh - m, c.r, c.g, c.b, c.a},
+              {cx + hw + m, cy - hh - m,  hw + m, -hh - m, c.r, c.g, c.b, c.a},
+              {cx + hw + m, cy + hh + m,  hw + m,  hh + m, c.r, c.g, c.b, c.a},
+              {cx - hw - m, cy - hh - m, -hw - m, -hh - m, c.r, c.g, c.b, c.a},
+              {cx + hw + m, cy + hh + m,  hw + m,  hh + m, c.r, c.g, c.b, c.a},
+              {cx - hw - m, cy + hh + m, -hw - m,  hh + m, c.r, c.g, c.b, c.a}};
+    glUseProgram(ring_prog_);
+    glUniform2f(ur_proj_, (float)fb_w_, (float)fb_h_);
+    glUniform2f(ur_half_, hw, hh);
+    glUniform1f(ur_rad_, rad);
+    glUniform1f(ur_th_, th);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    const char* base = (const char*)v;
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(V),base);
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,sizeof(V),base + 8);
+    glEnableVertexAttribArray(2); glVertexAttribPointer(2,4,GL_FLOAT,GL_FALSE,sizeof(V),base + 16);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glUseProgram(prog_);
+}
 void Renderer::round_corners(const Rect& r, float rad, Color outside, int corners) {
     rad = std::min(rad, std::min(r.w, r.h) / 2);
     if (rad < 1 || !notch_) return;
@@ -525,11 +575,11 @@ void Renderer::text(const Font& f, const std::string& s0, float x, float y, Colo
 }
 void Renderer::flush() {
     if (verts_.empty()) return;
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glBufferData(GL_ARRAY_BUFFER, verts_.size()*sizeof(V), verts_.data(), GL_STREAM_DRAW);
-    glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(V),(void*)0);
-    glEnableVertexAttribArray(1); glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,sizeof(V),(void*)8);
-    glEnableVertexAttribArray(2); glVertexAttribPointer(2,4,GL_FLOAT,GL_FALSE,sizeof(V),(void*)16);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);   // client-side arrays: no buffer to wait on between batches
+    const char* base = (const char*)verts_.data();
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,sizeof(V),base);
+    glEnableVertexAttribArray(1); glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,sizeof(V),base + 8);
+    glEnableVertexAttribArray(2); glVertexAttribPointer(2,4,GL_FLOAT,GL_FALSE,sizeof(V),base + 16);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, cur_tex_ ? cur_tex_ : white_);
     glDrawArrays(GL_TRIANGLES, 0, (int)verts_.size());

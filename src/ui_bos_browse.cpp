@@ -113,7 +113,7 @@ void App::design_browse_top(gfx::Renderer& rn, float cx0) {
     const float u = H / 768.f, bar = 64 * u, head_h = in_channel_view_ ? 102 * u : 0.f;
     const float top_y = bar + 4 * u + head_h, pill_h = 48 * u, rows_top = top_y + pill_h;
     const gfx::Font& rf = dz(DZ_ROW);
-    rn.quad({0, 0, (float)W, rows_top}, kBg);
+    rn.quad({0, 0, (float)W, rows_top + 4 * u}, kBg);   // + 4: the marks of the row scrolled above
     design_status_bar(rn);
     if (in_channel_view_) {   // avatar 96, name 44/700, "@handle · subscribers · videos" 24, the follow pill
         const float ay = bar + 4 * u, a = 96 * u;
@@ -520,6 +520,17 @@ void App::render_resume_prompt(gfx::Renderer& rn) {
                  {{std::string(i18n::tr(S::ResumeFrom)) + " " + tb, "", false, "play"},
                   {i18n::tr(S::StartOver), "", false, "repeat"}},
                  resume_prompt_sel_, {{"A", i18n::tr(S::HintSelect)}, {"B", i18n::tr(S::HintClose)}});
+    rn.end();
+}
+
+// B on Home: leave YouTube? (the first row leaves, red; B or the second row stays)
+void App::render_quit_prompt(gfx::Renderer& rn) {
+    using S = i18n::Str;
+    const int W = win_->width(), H = win_->height();
+    rn.begin(W, H);
+    design_sheet(rn, i18n::tr(S::QuitAsk), "",
+                 {{i18n::tr(S::QuitLeave), "", true, "power"}, {i18n::tr(S::QuitStay), "", false, "play"}},
+                 quit_prompt_sel_, {{"A", i18n::tr(S::HintSelect)}, {"B", i18n::tr(S::HintClose)}});
     rn.end();
 }
 

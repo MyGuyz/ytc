@@ -770,6 +770,10 @@ private:
 
     // Resume prompt (shown before playback when a saved position exists).
     bool resume_prompt_open_ = false;
+    bool quit_prompt_open_ = false;  // "Leave YouTube?" after B on Home
+    int quit_prompt_sel_ = 0;
+    void render_quit_prompt(gfx::Renderer& rn);
+    double stall_pos_ = 0; unsigned stall_since_ = 0; bool stall_moved_ = false;  // made-for-kids wall
     int  resume_prompt_sel_ = 0;               // 0 = Resume, 1 = Start over
     double resume_prompt_pos_ = 0;
     yt::SearchResult resume_prompt_item_;

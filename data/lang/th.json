@@ -259,5 +259,10 @@
   "HintRemove": "นำออก",
   "HintSeek": "เลื่อน",
   "HintVolume": "เสียง",
-  "HintStopCast": "หยุดแคสต์"
+  "HintStopCast": "หยุดแคสต์",
+  "KidsPartial": "คลิปสำหรับเด็ก: YouTube ให้แอปนี้เล่นได้แค่ช่วงต้น",
+  "KidsWall": "YouTube ไม่ให้เล่นคลิปสำหรับเด็กต่อจากตรงนี้",
+  "QuitAsk": "ออกจาก YouTube ไหม",
+  "QuitLeave": "ออก",
+  "QuitStay": "อยู่ต่อ"
 }

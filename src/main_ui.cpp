@@ -12,6 +12,7 @@
 #define SDL_MAIN_HANDLED   // we provide our own main(); don't pull in SDL2main (breaks macOS link)
 #include <SDL.h>
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 #include <fstream>
@@ -1152,6 +1153,10 @@ int main(int argc, char** argv) {
     const int kStickOn = 20000, kStickOff = 12000;   // hysteresis to avoid jitter
     SDL_StartTextInput();   // enable SDL_TEXTINPUT events for the OSK
     bool swallow_text = false;  // eat the "/" TEXTINPUT that follows opening search via slash
+    // B held on the keyboard deletes: after 400 ms, one character every 60 ms (40 ms past 1.5 s)
+    bool bs_held = false; Uint32 bs_start = 0, bs_last = 0;
+    const bool fps_log = std::getenv("YTC_FPS") != nullptr;
+    Uint64 frame_last = SDL_GetPerformanceCounter(); double frame_sum = 0, frame_max = 0, render_sum = 0, swap_sum = 0; int frame_n = 0;
     while (running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -1210,7 +1215,10 @@ int main(int argc, char** argv) {
                 if (std::getenv("YTC_DEBUG"))
                     std::fprintf(stderr, "gamepad button: %s\n",
                         SDL_GameControllerGetStringForButton((SDL_GameControllerButton)b));
-                if (app.mode() == M::Search && !app.menu_open() && app.kb_pad(b)) continue;
+                if (app.mode() == M::Search && !app.menu_open() && app.kb_pad(b)) {
+                    if (b == SDL_CONTROLLER_BUTTON_B) { bs_held = true; bs_start = bs_last = SDL_GetTicks(); }
+                    continue;
+                }
                 if (b == SDL_CONTROLLER_BUTTON_Y) app.input(A::Search); // open/submit
                 else if (b == SDL_CONTROLLER_BUTTON_X) app.input(A::Sort);      // X = sort (comments)
                 else if (b == SDL_CONTROLLER_BUTTON_BACK) app.input(A::Menu);   // Select btn = options
@@ -1228,6 +1236,7 @@ int main(int argc, char** argv) {
             }
             else if (e.type == SDL_CONTROLLERBUTTONUP) {
                 end_hold(e.cbutton.button);
+                if (e.cbutton.button == SDL_CONTROLLER_BUTTON_B) bs_held = false;
             }
             else if (e.type == SDL_CONTROLLERAXISMOTION) {
                 // Left stick behaves like the d-pad: crossing the threshold in a direction
@@ -1288,11 +1297,35 @@ int main(int argc, char** argv) {
                 }
             }
         }
+        if (bs_held) {
+            Uint32 now = SDL_GetTicks();
+            if (app.mode() != M::Search || app.menu_open()) bs_held = false;
+            else if (now - bs_start > 400 && now - bs_last >= (now - bs_start > 1500 ? 40u : 60u)) {
+                app.backspace(); bs_last = now;
+            }
+        }
         app.pump_async();
         if (app.screen_dark()) { SDL_Delay(100); continue; }   // screen off: audio only, draw nothing
+        Uint64 r0 = SDL_GetPerformanceCounter();
         app.render(rn);
+        Uint64 r1 = SDL_GetPerformanceCounter();
         win->swap();
-        SDL_Delay(16);
+        if (fps_log) { double f = 1000.0 / SDL_GetPerformanceFrequency();
+                       render_sum += (r1 - r0) * f; swap_sum += (SDL_GetPerformanceCounter() - r1) * f; }
+        // Pace to ~60: with vsync the swap already waited; without it, sleep only what is left of 16.7 ms
+        // (a fixed 16 ms sleep on top of a vsynced swap made every frame two refreshes long, i.e. 30 fps).
+        Uint64 fnow = SDL_GetPerformanceCounter();
+        double fms = (fnow - frame_last) * 1000.0 / SDL_GetPerformanceFrequency();
+        if (fms < 15.5) { SDL_Delay((Uint32)(16.6 - fms)); fnow = SDL_GetPerformanceCounter();
+                          fms = (fnow - frame_last) * 1000.0 / SDL_GetPerformanceFrequency(); }
+        frame_last = fnow;
+        if (fps_log) {
+            frame_sum += fms; frame_max = std::max(frame_max, fms);
+            if (++frame_n == 120) {
+                std::fprintf(stderr, "[fps] avg %.1f ms, worst %.1f ms (render %.1f, swap %.1f)\n", frame_sum / frame_n, frame_max, render_sum / frame_n, swap_sum / frame_n);
+                frame_sum = frame_max = render_sum = swap_sum = 0; frame_n = 0;
+            }
+        }
     }
     SDL_StopTextInput();
     if (pad) SDL_GameControllerClose(pad);

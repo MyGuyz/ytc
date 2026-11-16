@@ -1191,7 +1191,7 @@ void App::open_main_menu() {
     // Don't open behind another modal overlay — Start is wired straight to this from the
     // event loop (bypassing input()), so guard here for every caller.
     if (cast_picker_open_ || cast_confirm_remove_ || cast_manage_open_ ||
-        resume_prompt_open_ || desc_open_ || comments_open_ || casting_ ||
+        resume_prompt_open_ || quit_prompt_open_ || desc_open_ || comments_open_ || casting_ ||
         mode_ == Mode::Search) return;
     menu_kind_ = MenuKind::Main;
     menu_items_.clear();
@@ -3340,6 +3340,20 @@ const yt::SearchResult* App::selected() const {
 }
 void App::input(Action a) {
     if (screen_dark_) return;   // screen off (power tap): the buttons do nothing until it wakes
+    // "Leave YouTube?" (B on Home): the first row leaves, the second stays
+    if (quit_prompt_open_) {
+        switch (a) {
+            case Action::Up: case Action::Down:
+            case Action::Left: case Action::Right: quit_prompt_sel_ ^= 1; break;
+            case Action::Select:
+                quit_prompt_open_ = false;
+                if (quit_prompt_sel_ == 0) quit_requested_ = true;
+                break;
+            case Action::Back: quit_prompt_open_ = false; break;
+            default: break;
+        }
+        return;
+    }
     // Resume prompt consumes input while open (a pre-playback modal).
     if (resume_prompt_open_) {
         switch (a) {
@@ -3702,9 +3716,10 @@ void App::input(Action a) {
         if (search_tabs_active() && search_tab_ != 0) { load_search_tab(0); return; }
         // Stage 3: normal back — unwind a subview (channel/playlist -> where it was
         // opened from), else a top-level view that isn't Home falls back to Home.
-        // On Home itself, Back does nothing (never quits).
+        // On Home itself, Back asks whether to leave YouTube.
         if (pop_view()) return;
-        if (!query_.empty() || !view_label_.empty()) load_home();
+        if (!query_.empty() || !view_label_.empty()) { load_home(); return; }
+        quit_prompt_open_ = true; quit_prompt_sel_ = 0;
         return;
     }
     if (view_mode_ == ViewMode::Shelves) { shelves_input(a); return; }
@@ -3886,7 +3901,21 @@ void App::pump_async() {
             if (delta != 0) player_.seek_relative(delta);
             has_pending_seek_ = false; pending_seek_ = 0;
         }
-        if (!player_.pump()) {       // playback ended (EOF/error)
+        // Made-for-kids (paced) delivery: without a PO token YouTube serves only about the first quarter of
+        // each stream (measured: every itag 403s past ~25 % of its bytes, fresh URLs too, waiting does not
+        // move it). Playback then freezes for good; after 6 s without progress, say why and move on.
+        bool wall = false;
+        if (playing_paced_ && !player_.paused() && !has_pending_seek_) {
+            Uint32 now = SDL_GetTicks();
+            if (p > stall_pos_ + 0.2) { stall_pos_ = p; stall_since_ = now; stall_moved_ = true; }
+            else if (stall_moved_ && now - stall_since_ > 6000) wall = true;
+        } else stall_since_ = SDL_GetTicks();
+        if (wall) {
+            save_resume_position();
+            handle_playback_ended();
+            status_msg_ = i18n::tr(i18n::Str::KidsWall);
+            status_until_ = SDL_GetTicks() + 7000;
+        } else if (!player_.pump()) {       // playback ended (EOF/error)
             handle_playback_ended();  // autoplay next / related, or back to grid
         }
     }
@@ -3985,6 +4014,7 @@ void App::render(gfx::Renderer& rn) {
     if (desc_open_) render_description(rn);   // description floats above everything
     if (comments_open_) render_comments(rn);  // comments float above everything
     if (resume_prompt_open_) render_resume_prompt(rn);
+    if (quit_prompt_open_) render_quit_prompt(rn);
     if (casting_) render_remote(rn);
     else if (cast_picker_open_ && mode_ != Mode::Search) render_cast_picker(rn);
     else if (cast_manage_open_ && mode_ != Mode::Search) render_manage_devices(rn);
@@ -4296,7 +4326,7 @@ void App::render_shelves(gfx::Renderer& rn) {
     const gfx::Color text2 = gfx::Color::rgb(0xB4B4BA);
 
     // the rail: 96 wide, 56 circles from 28 under the status bar, gap 14, icons 30; the current page on surface2
-    rn.quad({0, bar, cx0 - 4*u, hint_top - bar}, dzc::bg);   // cards scrolled off to the left
+    rn.quad({0, bar, cx0 - 18*u, hint_top - bar}, dzc::bg);  // cards scrolled off to the left (not the ring)
     static const char* kRailIcons[kRailItems] = {"search", "home", "heart", "clock", "history", "settings"};
     int page = rail_page();
     for (int k = 0; k < kRailItems; ++k) {
@@ -5180,9 +5210,10 @@ void App::poll_resolve() {
     playing_paced_ = r.paced;
     playing_vbitrate_ = r.video_bitrate;
     played_max_ = start_at;                     // seek window anchors here
+    stall_pos_ = start_at; stall_since_ = SDL_GetTicks(); stall_moved_ = false;
     if (playing_paced_) {
-        status_msg_ = i18n::tr(i18n::Str::SeekLimited);
-        status_until_ = SDL_GetTicks() + 5000;
+        status_msg_ = i18n::tr(i18n::Str::KidsPartial);
+        status_until_ = SDL_GetTicks() + 6000;
         // Remember the channel verdict (restriction is channel-wide in practice);
         // the "Hide Restricted" filter picks it up like any checked verdict.
         rcheck_.put(now_playing_item_.channel_id, true);
