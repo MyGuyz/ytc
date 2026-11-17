@@ -2,6 +2,9 @@
 // coverflow) share the TV view's top (status bar, search pill, tabs), its cards, its focus ring and its hint bar;
 // and the small screens drawn the same way: the resume question, the cast picker, linked devices and the remote.
 // Sizes are the 1024x768 mockup's px.
+#include <SDL.h>
+#include <cctype>
+#include <cstdio>
 #include "ui.h"
 #include "i18n.h"
 #include <algorithm>
@@ -12,6 +15,7 @@ namespace ui {
 
 std::string humanize_age(const std::string& p);   // ui.cpp
 int length_seconds(const std::string& s);          // ui.cpp
+std::vector<std::string> wrap_text(const gfx::Font& f, const std::string& text, float max_w);   // ui.cpp
 
 namespace {
 const gfx::Color kBg{0, 0, 0, 1}, kWhite{1, 1, 1, 1};
@@ -44,7 +48,8 @@ std::string App::card_meta(const yt::SearchResult& v) {
     else {
         std::string author = v.author;
         if (author.empty() && !v.channel_id.empty()) author = chan_meta_.name(v.channel_id);
-        add(author); add(v.view_count_text); add(humanize_age(v.published_text));
+        add(author); add(v.is_post() ? post_likes(v.view_count_text) : v.view_count_text);
+        add(humanize_age(v.published_text));
     }
     return meta;
 }
@@ -78,6 +83,15 @@ void App::design_thumb(gfx::Renderer& rn, const yt::SearchResult& v, const gfx::
             rn.quad({tr.x, tr.y + tr.h - 5 * u, (float)(tr.w * std::min(1.0, pos / len)), 5 * u},
                     gfx::Color::rgb(0xFF0033).with_a(alpha));
         }
+    }
+    if (v.is_post() && v.post_images.size() > 1 && tr.w > 120 * u) {   // a post with pictures: "1/3" top right
+        const gfx::Font& bf = dz(DZ_BADGE);
+        std::string t = "1/" + std::to_string(v.post_images.size());
+        float ic = 20 * u, bw = ic + 6 * u + bf.text_width(t) + 24 * u, bh = 34 * u;
+        gfx::Rect br{tr.x + tr.w - 12 * u - bw, tr.y + 12 * u, bw, bh};
+        rn.round_rect(br, bh / 2, kBg.with_a(0.72f * alpha));
+        bos_icon(rn, "image", br.x + 12 * u, br.y + (bh - ic) / 2, ic, kWhite.with_a(alpha));
+        rn.text(bf, t, br.x + 12 * u + ic + 6 * u, br.y + (bh - bf.line_height()) / 2, kWhite.with_a(alpha));
     }
     std::string pill = v.is_short ? std::string() : v.is_playlist() ? v.view_count_text : v.length_text;
     if (!pill.empty() && tr.w > 120 * u) {   // duration: 18/600 on black 80 %, radius 8, padding 2 8, 10 from the corner
@@ -198,11 +212,15 @@ void App::design_browse_hints(gfx::Renderer& rn) {
                         {{"START", i18n::tr(S::HintMenu)}});
     } else if (in_channel_view_) {
         bool fav = !channel_info_.channel_id.empty() && fav_ids_.count(channel_info_.channel_id);
-        design_hint_bar(rn, {{"A", i18n::tr(S::HintPlay)}, {"B", i18n::tr(S::HintBack)},
+        const yt::SearchResult* v = sel_ >= 0 && sel_ < (int)results_.size() ? &results_[sel_] : nullptr;
+        S a = v && v->is_post() && v->video_id.empty() ? S::HintReadPost : S::HintPlay;
+        design_hint_bar(rn, {{"A", i18n::tr(a)}, {"B", i18n::tr(S::HintBack)},
                              {"X", i18n::tr(fav ? S::Unfollow : S::Subscribe)}},
                         {{"L1 R1", i18n::tr(S::HintTab)}});
     } else {
-        design_hint_bar(rn, {{"A", i18n::tr(S::HintPlay)}, {"B", i18n::tr(S::HintBack)},
+        const yt::SearchResult* v = sel_ >= 0 && sel_ < (int)results_.size() ? &results_[sel_] : nullptr;
+        S a = v && v->is_post() && v->video_id.empty() ? S::HintReadPost : S::HintPlay;
+        design_hint_bar(rn, {{"A", i18n::tr(a)}, {"B", i18n::tr(S::HintBack)},
                              {"X", i18n::tr(S::HintFollow)}, {"Y", i18n::tr(S::HintSearch)}},
                         {{"SELECT", i18n::tr(S::HintOptions)}});
     }
@@ -610,6 +628,196 @@ void App::render_remote(gfx::Renderer& rn) {
     rn.text(pf, vol, pr.x + 24 * u + 32 * u + 12 * u, pr.y + (ph - pf.line_height()) / 2, kWhite);
     design_hint_bar(rn, {{"A", i18n::tr(S::HintPlayPause)}, {"B", i18n::tr(S::HintStopCast)}},
                     {{"\xE2\x86\x90\xE2\x86\x92", i18n::tr(S::HintSeek)}, {"\xE2\x86\x91\xE2\x86\x93", i18n::tr(S::HintVolume)}});
+    design_toast(rn);
+    rn.end();
+}
+
+// ---------- Post page (brick-os board v2-YouTubePost) ----------
+std::string App::post_likes(const std::string& raw) const {
+    static const std::string suf = " likes";
+    if (raw.size() <= suf.size() || raw.compare(raw.size() - suf.size(), suf.size(), suf) != 0) return raw;
+    std::string n = raw.substr(0, raw.size() - suf.size());
+    char buf[96];
+    std::snprintf(buf, sizeof buf, i18n::tr(i18n::Str::PostLikes), n.c_str());
+    return buf;
+}
+
+// The pictures move like the carousel: a critically damped spring toward the one shown (settles in about 0.2 s).
+void App::update_post_spring() {
+    unsigned now = SDL_GetTicks();
+    float dt = post_img_last_ ? (now - post_img_last_) / 1000.f : 0.016f;
+    post_img_last_ = now;
+    if (dt > 0.05f) dt = 0.05f;
+    const float om = 2.f / 0.20f, x = om * dt, ex = 1.f / (1.f + x + 0.48f * x * x + 0.235f * x * x * x);
+    float target = (float)post_img_, chg = post_img_pos_ - target, tmp = (post_img_vel_ + om * chg) * dt;
+    post_img_vel_ = (post_img_vel_ - om * tmp) * ex;
+    post_img_pos_ = target + (chg + tmp) * ex;
+    if (std::abs(post_img_pos_ - target) < 0.001f && std::abs(post_img_vel_) < 0.02f) {
+        post_img_pos_ = target; post_img_vel_ = 0; post_img_last_ = 0;
+    }
+}
+
+// A picture of the post fitted whole (contain) into r, on the surface colour with rounded corners.
+static void fit_texture(gfx::Renderer& rn, const gfx::Texture& t, const gfx::Rect& r) {
+    float k = std::min(r.w / t.width(), r.h / t.height());
+    float w = t.width() * k, h = t.height() * k;
+    rn.textured({r.x + (r.w - w) / 2, r.y + (r.h - h) / 2, w, h}, t);
+}
+
+// The full-screen picture asks for a bigger copy (=s1024) of the same picture.
+static std::string big_url(const std::string& u) {
+    size_t p = u.find("=s");
+    if (p == std::string::npos) return u;
+    size_t e = p + 2;
+    while (e < u.size() && std::isdigit((unsigned char)u[e])) ++e;
+    return u.substr(0, p) + "=s1024" + u.substr(e);
+}
+
+// Pictures left (480 square, "k / n" and dots under them), the author, age and likes and the whole text right
+// (↑↓), then the buttons [เล่นคลิป] [ความคิดเห็น]. Y: the picture full screen (←→ still change it, B back).
+void App::render_post(gfx::Renderer& rn) {
+    using S = i18n::Str;
+    const int W = win_->width(), H = win_->height();
+    const float u = H / 768.f;
+    bos_refresh();
+    rn.begin(W, H);
+    rn.quad({0, 0, (float)W, (float)H}, kBg);
+    update_post_spring();
+    const yt::SearchResult& p = post_item_;
+    const int nimg = (int)post_images_.size();
+    auto badge = [&](float cx, float y, int k) {
+        const gfx::Font& bf = dz(DZ_BADGE);
+        std::string t = std::to_string(k + 1) + " / " + std::to_string(nimg);
+        float bw = bf.text_width(t) + 24 * u, bh = 34 * u;
+        rn.round_rect({cx - bw / 2, y, bw, bh}, bh / 2, kBg.with_a(0.72f));
+        rn.text(bf, t, cx - bf.text_width(t) / 2, y + (bh - bf.line_height()) / 2, kWhite);
+    };
+    int k0 = std::max(0, (int)std::floor(post_img_pos_) - 1), k1 = std::min(nimg - 1, (int)std::ceil(post_img_pos_) + 1);
+
+    if (post_full_ && nimg > 0) {   // the picture, whole, between the bars
+        design_status_bar(rn, i18n::tr(S::TabPosts));
+        float top = 64 * u, ah = H - 128 * u;
+        for (int k = k0; k <= k1; ++k) {
+            gfx::Rect r{(k - post_img_pos_) * W, top, (float)W, ah};
+            std::string bu = big_url(post_images_[k]);
+            thumbs_.request(bu);
+            gfx::Texture* t = thumbs_.get(bu);
+            if (!t) t = thumbs_.get(post_images_[k]);   // the smaller one until the big one is in
+            if (t) fit_texture(rn, *t, r);
+        }
+        if (nimg > 1) badge(W / 2.f, top + 16 * u, post_img_);
+        Hints left;
+        if (nimg > 1) left.push_back({"\xE2\x86\x90\xE2\x86\x92", i18n::tr(S::HintPictures)});
+        design_hint_bar(rn, {{"B", i18n::tr(S::HintBack)}}, left);
+        rn.end();
+        return;
+    }
+
+    const float top = 64 * u + 16 * u, box = 480 * u, bx = 32 * u;
+    bool pics = nimg > 0, clip = post_has_video_ && !pics;
+    if (pics) {
+        for (int k = k0; k <= k1; ++k) {
+            gfx::Rect r{bx + (k - post_img_pos_) * (box + 24 * u), top, box, box};
+            rn.round_rect(r, 24 * u, kSurf);
+            if (gfx::Texture* t = thumbs_.get(post_images_[k])) fit_texture(rn, *t, r);
+            rn.round_corners(r, 24 * u, kBg);
+        }
+        rn.quad({0, top - 2 * u, bx, box + 4 * u}, kBg);   // what slid out of the box
+        rn.quad({bx + box, top - 2 * u, W - bx - box, box + 4 * u}, kBg);
+        if (nimg > 1) {
+            badge(bx + box - 52 * u, top + 16 * u, post_img_);
+            float dw = 10 * u, cur = 28 * u, gap = 8 * u, tw = (nimg - 1) * (dw + gap) + cur;
+            float x = bx + (box - tw) / 2, y = top + box + 20 * u;
+            for (int k = 0; k < nimg; ++k) {
+                float w = k == post_img_ ? cur : dw;
+                rn.round_rect({x, y, w, dw}, dw / 2, k == post_img_ ? kWhite : kSurf2);
+                x += w + gap;
+            }
+        }
+    } else if (clip) {   // the clip: its picture with a play mark
+        gfx::Rect r{bx, top, box, box * 9.f / 16.f};
+        rn.round_rect(r, 24 * u, kSurf);
+        if (!post_thumb_url_.empty())
+            if (gfx::Texture* t = thumbs_.get(post_thumb_url_)) rn.textured_cover(r, *t);
+        rn.round_corners(r, 24 * u, kBg);
+        float pc = 88 * u;
+        rn.round_rect({r.x + (r.w - pc) / 2, r.y + (r.h - pc) / 2, pc, pc}, pc / 2, kBg.with_a(0.6f));
+        bos_icon(rn, "play", r.x + (r.w - 44 * u) / 2 + 3 * u, r.y + (r.h - 44 * u) / 2, 44 * u, kWhite);
+    }
+    design_status_bar(rn, i18n::tr(S::TabPosts));
+
+    // the right column (all the width when the post has no picture)
+    const float cx = (pics || clip) ? bx + box + 32 * u : bx, cw = W - 32 * u - cx;
+    float y = top;
+    {   // the author: avatar 56, name, then age · likes
+        float av = 56 * u;
+        gfx::Rect ar{cx, y, av, av};
+        std::string au = chan_meta_.avatar(p.channel_id);
+        gfx::Texture* at = nullptr;
+        if (!au.empty()) { thumbs_.request(au); at = thumbs_.get(au); }
+        if (at) rn.textured_cover(ar, *at);
+        else rn.round_rect(ar, av / 2, gfx::Color::rgb(0x5E5CE6));
+        rn.round_corners(ar, av / 2, kBg);
+        std::string name = p.author.empty() ? chan_meta_.name(p.channel_id) : p.author;
+        const gfx::Font &nf = dz(DZ_DESC_T), &mf = dz(DZ_SHEET_M);
+        float tx = cx + av + 14 * u, tw = cw - av - 14 * u;
+        rn.text(nf, nf.ellipsize(name, tw), tx, y + av / 2 - nf.line_height() + 4 * u, kWhite);
+        std::string meta = humanize_age(p.published_text);
+        std::string likes = post_likes(p.view_count_text);
+        if (!likes.empty()) meta += (meta.empty() ? "" : " \xC2\xB7 ") + likes;
+        rn.text(mf, mf.ellipsize(meta, tw), tx, y + av / 2 + 2 * u, kText2);
+        y += av + 18 * u;
+    }
+    // the buttons along the bottom of the column
+    bool com = !desc_post_id_.empty();
+    std::vector<std::pair<const char*, S>> btns;
+    if (post_has_video_) btns.push_back({"play", S::PostPlayClip});
+    if (com) btns.push_back({"comment", S::HintComments});
+    if (post_focus_ >= (int)btns.size()) post_focus_ = 0;
+    const float bh = 72 * u, bot = H - 64 * u - 16 * u;
+    float body_bot = btns.empty() ? bot : bot - bh - 14 * u;
+    if (!btns.empty()) {
+        float gap = 12 * u, w = (cw - gap * (btns.size() - 1)) / btns.size(), x = cx;
+        for (int i = 0; i < (int)btns.size(); ++i) {
+            bool on = i == post_focus_;
+            gfx::Rect r{x, bot - bh, w, bh};
+            rn.round_rect(r, 20 * u, on ? bos_.focus : kSurf);
+            gfx::Color c = on ? bos_.onfocus : kWhite;
+            const gfx::Font& f = dz(DZ_TILE);
+            bos_icon(rn, btns[i].first, r.x + 22 * u, r.y + (bh - 32 * u) / 2, 32 * u, c);
+            rn.text(f, f.ellipsize(i18n::tr(btns[i].second), w - 80 * u), r.x + 68 * u,
+                    r.y + (bh - f.line_height()) / 2, c);
+            x += w + gap;
+        }
+    }
+    // the whole text, ↑↓
+    const gfx::Font& bf = dz(DZ_DESC);
+    if (desc_lines_.empty() || desc_wrap_w_ != cw) {
+        desc_lines_ = wrap_text(bf, desc_text_, cw);
+        desc_wrap_w_ = cw;
+    }
+    float lh = bf.line_height() + 8 * u, total = desc_lines_.size() * lh, view = body_bot - y;
+    float max_scroll = total > view ? total - view : 0;
+    desc_scroll_ = std::max(0.f, std::min(desc_scroll_, max_scroll));
+    float ly = y - desc_scroll_;
+    for (const auto& l : desc_lines_) {
+        if (ly >= y - 0.5f && ly <= body_bot - lh * 0.6f) rn.text(bf, l, cx, ly, kWhite);
+        ly += lh;
+    }
+    if (max_scroll > 0) {
+        float knob = std::max(32 * u, view * (view / total));
+        float ky = y + (view - knob) * (desc_scroll_ / max_scroll);
+        rn.round_rect({W - 18 * u, ky, 4 * u, knob}, 2 * u, gfx::Color::rgb(0x6E6E73));
+    }
+
+    Hints right, left;
+    if (!btns.empty()) right.push_back({"A", i18n::tr(btns[post_focus_].second)});
+    right.push_back({"B", i18n::tr(S::HintBack)});
+    if (pics) right.push_back({"Y", i18n::tr(S::HintFullScreen)});
+    if (nimg > 1) left.push_back({"\xE2\x86\x90\xE2\x86\x92", i18n::tr(S::HintPictures)});
+    else if (btns.size() == 2) left.push_back({"\xE2\x86\x90\xE2\x86\x92", i18n::tr(S::HintSelect)});
+    if (max_scroll > 0) left.push_back({"\xE2\x86\x91\xE2\x86\x93", i18n::tr(S::HintScroll)});
+    design_hint_bar(rn, right, left);
     design_toast(rn);
     rn.end();
 }

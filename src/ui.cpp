@@ -1921,6 +1921,11 @@ void App::open_post(const yt::SearchResult& p) {
     post_thumb_url_ = p.thumbnail_url;
     post_focus_ = 0;
     if (post_has_video_ && !post_thumb_url_.empty()) thumbs_.request(post_thumb_url_);
+    post_item_ = p;
+    post_images_ = p.post_images;
+    post_img_ = 0; post_img_pos_ = 0; post_img_vel_ = 0; post_img_last_ = 0;
+    post_full_ = false;
+    for (const std::string& u : post_images_) thumbs_.request(u);
     desc_open_ = true;   // desc_paused_ is managed by the caller (menu path)
 }
 
@@ -1959,7 +1964,7 @@ static bool cjk_no_break_after(uint32_t c) {
 // Greedy word-wrap honoring \n. Latin text breaks at spaces; CJK between
 // characters (rules above). Very long unbreakable runs (URLs) hard-break at
 // character boundaries so nothing overflows the panel.
-static std::vector<std::string> wrap_text(const gfx::Font& f, const std::string& text,
+std::vector<std::string> wrap_text(const gfx::Font& f, const std::string& text,
                                           float max_w) {
     std::vector<std::string> lines;
     struct Ch { size_t at; uint32_t cp; };
@@ -3479,6 +3484,45 @@ void App::input(Action a) {
             if (desc_paused_ && mode_ == Mode::Playing) player_.set_pause(false);
             desc_paused_ = false;
         };
+        // Brick OS post page: ←→ the pictures (a fresh press wraps), ↑↓ the text, Y a picture full screen,
+        // A the focused button (เล่นคลิป / ความคิดเห็น; ←→ between them when there are no pictures), B back.
+        if (desc_is_post_) {
+            int nimg = (int)post_images_.size();
+            bool clip = post_has_video_, com = !desc_post_id_.empty();
+            int nbtn = (clip ? 1 : 0) + (com ? 1 : 0);
+            if (post_focus_ >= nbtn) post_focus_ = 0;
+            auto spring_go = [&] { if (!post_img_last_) post_img_vel_ = 0; };
+            switch (a) {
+                case Action::Left:
+                    if (nimg > 1) { spring_go(); wrap_step(post_img_, nimg, -1); }
+                    else if (!post_full_ && nbtn == 2) post_focus_ = 0;
+                    break;
+                case Action::Right:
+                    if (nimg > 1) { spring_go(); wrap_step(post_img_, nimg, 1); }
+                    else if (!post_full_ && nbtn == 2) post_focus_ = 1;
+                    break;
+                case Action::Up:   if (!post_full_) desc_scroll_ -= step; break;
+                case Action::Down: if (!post_full_) desc_scroll_ += step; break;
+                case Action::Search: if (nimg > 0) post_full_ = !post_full_; break;
+                case Action::Select:
+                    if (post_full_ || nbtn == 0) break;
+                    if (clip && post_focus_ == 0) {          // play the attached clip
+                        close_desc();
+                        request_playback();
+                    } else if (com) {                         // this post's comments
+                        yt::SearchResult tmp;
+                        tmp.kind = yt::SearchResult::Kind::Post; tmp.post_id = desc_post_id_;
+                        tmp.channel_id = desc_post_channel_;
+                        comments_paused_ = false;
+                        open_comments(tmp);
+                    }
+                    break;
+                case Action::Back: if (post_full_) post_full_ = false; else close_desc(); break;
+                case Action::Menu: close_desc(); break;
+                default: break;
+            }
+            return;
+        }
         // Post overlay: selectable top buttons (video, comments) then the scrolling text.
         // Focus 0..n_top-1 = buttons in order [video, comments]; n_top = text scroll.
         bool has_comments_btn = desc_is_post_ && !desc_post_id_.empty();
@@ -4158,7 +4202,9 @@ void App::render(gfx::Renderer& rn) {
         else if (mode_ == Mode::Loading) render_loading(rn);
     }
     if (menu_open_) render_menu(rn);   // overlay on top of whatever view
-    if (desc_open_) render_description(rn);   // description floats above everything
+    if (desc_open_) {   // description floats above everything (a post: its own page)
+        if (desc_is_post_) render_post(rn); else render_description(rn);
+    }
     if (comments_open_) render_comments(rn);  // comments float above everything
     if (resume_prompt_open_) render_resume_prompt(rn);
     if (quit_prompt_open_) render_quit_prompt(rn);

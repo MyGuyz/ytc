@@ -75,6 +75,7 @@ const char* kKeys[(int)Str::COUNT] = {
     "HintRemove","HintSeek","HintVolume","HintStopCast",
     "KidsPartial","KidsWall","QuitAsk","QuitLeave","QuitStay",
     "HintPrevNext","HintCaptions","AutoplayDesc","CcToastOff","CcToastOn","CcToastNone","FirstClip",
+    "HintReadPost","HintPictures","HintFullScreen","PostLikes","PostPlayClip",
 };
 
 // English is baked in — the source strings AND the ultimate fallback, so the UI is
@@ -162,6 +163,7 @@ const char* kEnglish[(int)Str::COUNT] = {
     "Back","Options","Open","Close","Select","Menu","Change","Hide","Exit","Comments","Chapters","Type","Delete","Space","Search","OK","Play/Pause","Replies","YouTube settings","Chapter: ","Subscribed","Subscribe","Quality","Speed","\u0e01/A","Shift",
     "Description","Scroll","Sort",
     "Tabs","Unfollow",
+    "Read post","Pictures","Full screen","%s likes","Play clip",
 };
 
 struct Lang {

@@ -339,8 +339,19 @@ private:
     bool desc_is_post_ = false;          // this desc overlay is a community post
     std::string desc_post_id_;           // post id (for its comments), if any
     std::string desc_post_channel_;      // the post's owning channel id
-    int  post_focus_ = 0;
+    int  post_focus_ = 0;   // the post page's button: [เล่นคลิป,] ความคิดเห็น
     std::string post_thumb_url_;
+    // Brick OS post page (board v2-YouTubePost): its pictures, the one shown and where the strip is (a spring
+    // like the carousel's), and the full-screen picture view.
+    yt::SearchResult post_item_;
+    std::vector<std::string> post_images_;
+    int post_img_ = 0;
+    float post_img_pos_ = 0, post_img_vel_ = 0;
+    unsigned post_img_last_ = 0;
+    bool post_full_ = false;
+    void render_post(gfx::Renderer& rn);
+    void update_post_spring();
+    std::string post_likes(const std::string& raw) const;   // "359 likes" -> "ถูกใจ 359"
     std::string desc_title_, desc_text_;
     std::vector<std::string> desc_lines_;   // word-wrapped cache
     float desc_wrap_w_ = 0, desc_scroll_ = 0;

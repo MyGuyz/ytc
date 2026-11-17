@@ -271,5 +271,10 @@
   "CcToastOff": "Captions: off",
   "CcToastOn": "Captions: ",
   "CcToastNone": "This clip has no captions",
-  "FirstClip": "This is the first clip"
+  "FirstClip": "This is the first clip",
+  "HintReadPost": "Read post",
+  "HintPictures": "Pictures",
+  "HintFullScreen": "Full screen",
+  "PostLikes": "%s likes",
+  "PostPlayClip": "Play clip"
 }

@@ -271,5 +271,10 @@
   "CcToastOff": "คำบรรยาย: ปิด",
   "CcToastOn": "คำบรรยาย: ",
   "CcToastNone": "คลิปนี้ไม่มีคำบรรยาย",
-  "FirstClip": "นี่คือคลิปแรกแล้ว"
+  "FirstClip": "นี่คือคลิปแรกแล้ว",
+  "HintReadPost": "อ่านโพสต์",
+  "HintPictures": "รูป",
+  "HintFullScreen": "เต็มจอ",
+  "PostLikes": "ถูกใจ %s",
+  "PostPlayClip": "เล่นคลิป"
 }
