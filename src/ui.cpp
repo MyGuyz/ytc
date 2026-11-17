@@ -468,9 +468,15 @@ App::App(const std::string& config_path, gfx::Window* win)
     : win_(win), it_(config_path), cast_(dir_of(config_path)) {
     load_fonts();
     cols_ = compute_columns();
-    view_mode_ = (ViewMode)it_.setting_int("view", 0);   // 0 grid / 1 carousel / 2 coverflow
-    if (getenv("YTC_CAROUSEL")) view_mode_ = ViewMode::Carousel;
-    if (const char* vm = getenv("YTC_VIEW")) view_mode_ = (ViewMode)atoi(vm);
+    // YTC_VIEW / YTC_CAROUSEL (a launcher's pick) are the DEFAULT until the user picks a view in
+    // Settings — not an override, or the saved choice would reset on every launch.
+    {
+        int def = 0;   // 0 grid / 1 carousel / 2 3D carousel / 3 coverflow / 4 shelves
+        if (getenv("YTC_CAROUSEL")) def = (int)ViewMode::Carousel;
+        if (const char* vm = getenv("YTC_VIEW")) def = atoi(vm);
+        int v = it_.setting_int("view", def);
+        view_mode_ = (ViewMode)(v >= 0 && v <= 4 ? v : def);
+    }
     refresh_favorites();
     refresh_favorite_playlists();
     refresh_watch_later();

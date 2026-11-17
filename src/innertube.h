@@ -128,6 +128,7 @@ struct SearchResult {
     std::string post_text;        // post only: full text (title holds a preview);
                                   // video_id set = the post has an attached video
     std::string post_id;          // post only: backstage post id (for its comments)
+    std::vector<std::string> post_images;   // post only: its pictures (JPEG, ~640 px), in order
     bool is_channel() const { return kind == Kind::Channel; }
     bool is_playlist() const { return kind == Kind::Playlist; }
     bool is_post() const { return kind == Kind::Post; }

@@ -618,14 +618,36 @@ static void collect_results(const json& node, const std::string& chan_hint,
                                         std::string());
             if (n.contains("backstageAttachment")) {
                 const json& ba = n["backstageAttachment"];
-                if (const json* img = find_key(ba, "backstageImageRenderer")) {
-                    if (const json* th = find_key(*img, "thumbnails"))
-                        if (th->is_array() && !th->empty()) {
-                            std::string u = th->back().value("url", "");
-                            if (u.rfind("//", 0) == 0) u = "https:" + u;
-                            sr.thumbnail_url = u;
-                        }
+                // A post's pictures: one backstageImageRenderer, or several under
+                // postMultiImageRenderer. Each lists sizes up to s2500; take the first one
+                // >= 640 px (enough for the screen, light to decode) and ask for JPEG:
+                // the URLs carry "-rw" (WebP), which stb can't decode.
+                auto pick = [](const json& th) -> std::string {
+                    if (!th.is_array() || th.empty()) return {};
+                    const json* best = &th.back();
+                    for (const json& t : th)
+                        if (t.value("width", 0) >= 640) { best = &t; break; }
+                    std::string u = best->value("url", "");
+                    if (u.rfind("//", 0) == 0) u = "https:" + u;
+                    size_t rw = u.find("-rw");
+                    if (rw != std::string::npos && u.find("ggpht.com") != std::string::npos)
+                        u.replace(rw, 3, "-rj");
+                    return u;
+                };
+                std::vector<const json*> imgs;
+                if (const json* multi = find_key(ba, "postMultiImageRenderer")) {
+                    if (multi->contains("images") && (*multi)["images"].is_array())
+                        for (const json& im : (*multi)["images"])
+                            if (const json* r = find_key(im, "backstageImageRenderer")) imgs.push_back(r);
+                } else if (const json* img = find_key(ba, "backstageImageRenderer")) {
+                    imgs.push_back(img);
                 }
+                for (const json* img : imgs)
+                    if (const json* th = find_key(*img, "thumbnails")) {
+                        std::string u = pick(*th);
+                        if (!u.empty()) sr.post_images.push_back(u);
+                    }
+                if (!sr.post_images.empty()) sr.thumbnail_url = sr.post_images.front();
                 if (const json* vr = find_key(ba, "videoRenderer")) {
                     sr.video_id = vr->value("videoId", "");   // playable attachment
                     if (sr.thumbnail_url.empty() && !sr.video_id.empty())
@@ -721,6 +743,11 @@ Innertube::Feed Innertube::browse_tab(const std::string& browse_id, const char* 
         if (!r.ok()) return feed;
         auto j = json::parse(r.body, nullptr, false);
         if (j.is_discarded()) return feed;
+        // Debug: dump the raw tab response (YTC_DUMP_TAB=dir) for offline analysis.
+        if (const char* dump = getenv("YTC_DUMP_TAB")) {
+            std::ofstream f(std::string(dump) + "/tab_" + browse_id + "_" + (params ? params : "home") + ".json");
+            if (f) f << r.body;
+        }
         if (j.contains("contents")) collect_results(j["contents"], chan_hint, feed.items);
         feed.continuation = continuation_token(j);
         feed.ok = true;
