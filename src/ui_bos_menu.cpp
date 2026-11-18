@@ -160,6 +160,7 @@ void App::render_options_sheet(gfx::Renderer& rn) {
             case MenuAction::PlayPostVideo: ic = "play"; col = 0xFF0033; break;
             case MenuAction::CycleSpeed: ic = "speed"; col = 0x64D2FF; break;
             case MenuAction::ToggleAutoplay: ic = "repeat"; col = 0x30D158; break;
+            case MenuAction::ListenBackground: ic = "music"; col = 0xFF375F; break;
             default: break;
         }
         if (danger) col = 0xFF453A;

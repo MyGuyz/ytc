@@ -28,6 +28,8 @@
   "SetHidePaced": "ซ่อนวิดีโอที่โหลดช้า",
   "SetAskResume": "ถามก่อนดูต่อ",
   "SetHomeFeed": "ฟีดหน้าแรก",
+  "ListenBackground": "ฟังเบื้องหลัง",
+  "SetBgOnExit": "ออกแล้วเล่นเสียงต่อ",
   "SetAutoplay": "เล่นอัตโนมัติ",
   "SetSponsorBlock": "ข้ามโฆษณาสปอนเซอร์ (SponsorBlock)",
   "SetView": "มุมมอง",

@@ -22,7 +22,7 @@ enum class Str {
     SetAudioMenu, SetVideoMenu, SetCaptionsMenu, SetPlaybackMenu, SetBrowsingMenu,
     SetCaptionSize, SetCaptionStyle,
     SetHidePaced,
-    SetAskResume, SetHomeFeed, SetAutoplay, SetSponsorBlock, SetView, SetLanguage,
+    SetAskResume, SetHomeFeed, SetAutoplay, ListenBackground, SetBgOnExit, SetSponsorBlock, SetView, SetLanguage,
     // Settings values
     On, Off, Hardware, Software, AspectFit, AspectZoom, AspectStretch,
     AppLanguage, OriginalTrack, HomeCustom,

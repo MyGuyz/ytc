@@ -147,6 +147,10 @@ public:
     bool menu_open() const { return menu_open_; }
     void set_held(bool h) { held_ = h; }
     bool wants_quit() const { return quit_requested_; }     // set by the menu's Exit item
+    // Brick OS: hand the clip's sound to "ytc --bg" (a request in /tmp/ytbg) and stop the player. forced = the
+    // Listen-in-background tile; otherwise only while a clip plays and the setting is on.
+    bool exit_to_background(bool forced);
+    void resume_background(const std::string& video_id);   // reopen the clip the sound came from
     bool player_paused() const { return player_.paused(); } // for tests/telemetry
 
     const yt::SearchResult* selected() const;
@@ -290,7 +294,7 @@ private:
                             FeedRemoveYes, FeedRemoveNo, GoHomeFeedMenu,
                             ToggleFeedFavorites, ToggleFeedHistory, ToggleFeedCustom,
                             GoPlayback,
-                            ToggleSponsorBlock, CycleCaptions, ToggleAutoplay,
+                            ToggleSponsorBlock, CycleCaptions, ToggleAutoplay, ListenBackground, ToggleBgOnExit,
                             CycleLanguage, ClearHistory, CastToDevice,
                             GoLinkedDevices, DownloadVideo, RemoveDownload, GoDownloads,
                             OpenSearchFilters, CycleFilterType, CycleFilterDuration,
@@ -326,7 +330,7 @@ private:
         bool paced = false;        // made-for-kids restricted delivery: ranges beyond
                                    // a sliding window 403, so seeking must be clamped
         long video_bitrate = 0;    // bits/s of the chosen video format
-        std::string status, video_url, audio_url, user_agent, title, description;
+        std::string status, video_url, audio_url, user_agent, title, description, author;
         std::string audio_lang;    // track_lang of the chosen audio ("" = single-audio)
         std::vector<yt::AudioTrackInfo> audio_tracks;   // for the player track picker
     };
@@ -467,6 +471,9 @@ private:
 
     // Autoplay: when a video ends, play the next one automatically.
     bool autoplay_ = false;                // setting "autoplay" (default off)
+    bool bg_on_exit_ = true;               // setting "bg_on_exit": quitting during a clip keeps its sound
+    std::string playing_audio_url_, playing_video_url_, playing_ua_, playing_author_;   // for the hand-over
+    bool bg_handed_ = false;               // the sound went to "ytc --bg"
     int  home_sources_ = 1;                // "home_sources" bitmask: 1 Favorites,
                                            // 2 History, 4 Custom (saved searches);
                                            // enabled sources interleave into Home

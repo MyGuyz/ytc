@@ -7,6 +7,7 @@
 #include "../third_party/json.hpp"
 #include <SDL.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -526,6 +527,7 @@ App::App(const std::string& config_path, gfx::Window* win)
     }
     sponsorblock_ = it_.setting_int("sponsorblock", 0) != 0;   // default OFF
     autoplay_ = it_.setting_int("autoplay", 0) != 0;          // default OFF
+    bg_on_exit_ = it_.setting_int("bg_on_exit", 1) != 0;      // default ON
     // Home sources bitmask (1 fav / 2 history / 4 custom). Default: Favorites
     // only — History and Custom are opt-in via Browsing > Home Feed.
     home_sources_ = it_.setting_int("home_sources", 1) & 7;
@@ -1357,6 +1359,8 @@ void App::open_settings_audio() {
                            MenuAction::CycleVolume});
     menu_items_.push_back({tr(S::SetAudioLang) + std::string(":  ") + lang_pref_label(audio_lang_pref_),
                            MenuAction::CycleAudioLang});
+    menu_items_.push_back({tr(S::SetBgOnExit) + std::string(":  ") + tr(bg_on_exit_ ? S::On : S::Off),
+                           MenuAction::ToggleBgOnExit});
     menu_sel_ = 0;
     menu_open_ = true;
 }
@@ -1455,6 +1459,12 @@ void App::adjust_setting(MenuAction a, int dir) {
         volume_ = v;
         it_.set_setting_int("volume", volume_);
         if (mode_ == Mode::Playing) player_.set_volume(volume_);   // live if playing
+        int keep = menu_sel_; reopen_settings_menu(); menu_sel_ = keep;
+        return;
+    }
+    if (a == MenuAction::ToggleBgOnExit) {
+        bg_on_exit_ = !bg_on_exit_;
+        it_.set_setting_int("bg_on_exit", bg_on_exit_ ? 1 : 0);
         int keep = menu_sel_; reopen_settings_menu(); menu_sel_ = keep;
         return;
     }
@@ -2494,6 +2504,8 @@ void App::open_menu() {
         // Order everywhere: collect -> learn about it -> go/do -> heavy actions.
         // While playing, Playback (the per-video knobs) leads: it's the reason
         // the menu gets opened mid-video.
+        if (mode_ == Mode::Playing)   // Brick OS 7.5c: the sound goes on after YouTube closes
+            menu_items_.push_back({tr(S::ListenBackground), MenuAction::ListenBackground});
         if (mode_ == Mode::Playing)
             menu_items_.push_back({tr(S::SetPlaybackMenu), MenuAction::GoPlayback});
         if (mode_ == Mode::Playing)   // DESIGN 7.8: one switch, the same as Settings > Playback
@@ -2829,6 +2841,14 @@ void App::menu_activate() {
             menu_open_ = false;
             menu_paused_ = false;
             quit_requested_ = true;
+            return;
+        case MenuAction::ListenBackground:
+            menu_open_ = false;
+            menu_paused_ = false;
+            if (exit_to_background(true)) quit_requested_ = true;
+            return;
+        case MenuAction::ToggleBgOnExit:
+            adjust_setting(MenuAction::ToggleBgOnExit, 1);
             return;
     }
     // Context action that keeps us on the player (favorite / watch-later toggle):
@@ -4224,7 +4244,7 @@ bool App::is_value_action(MenuAction a) {
         case A::CycleAspect: case A::CycleAudioLang: case A::CycleCaptionLang:
         case A::CycleAudioTrack: case A::CycleCaptionSize: case A::CycleCaptionStyle:
         case A::CycleSpeed: case A::ToggleSponsorBlock: case A::CycleCaptions:
-        case A::ToggleAutoplay: case A::ToggleFeedFavorites: case A::ToggleFeedHistory:
+        case A::ToggleAutoplay: case A::ToggleBgOnExit: case A::ToggleFeedFavorites: case A::ToggleFeedHistory:
         case A::ToggleFeedCustom: case A::CycleLanguage: case A::CycleFilterType:
         case A::CycleFilterDuration: case A::CycleFilterDate: case A::CycleFilterSort:
             return true;
@@ -5356,6 +5376,7 @@ void App::start_resolve(const std::string& video_id, const std::string& title, d
         }
         r.title = info.title.empty() ? fallback_title : info.title;
         r.description = info.description;
+        r.author = info.author;
         if (!info.ok()) {
             r.ok = false;
             // Surface a human-readable reason (YouTube's own text is best).
@@ -5424,6 +5445,8 @@ void App::poll_resolve() {
         mode_ = Mode::Grid; status_msg_ = i18n::tr(i18n::Str::PlayerFailed); return;
     }
     player_.set_volume(volume_);                 // apply the app-local volume level
+    playing_audio_url_ = r.audio_url; playing_video_url_ = r.video_url; playing_ua_ = r.user_agent;
+    playing_author_ = r.author;
     player_.set_speed(playback_speed_);          // apply speed (persists across re-resolve)
     start_sponsorblock(now_playing_item_.video_id);   // fetch skip segments off-thread
     start_captions(now_playing_item_.video_id);        // fetch caption track list off-thread
@@ -5452,6 +5475,59 @@ void App::poll_resolve() {
         it_.add_history(now_playing_item_.video_id,
                         r.title.empty() ? now_playing_item_.title : r.title,
                         now_playing_item_.channel_id, now_playing_item_.author);
+}
+
+// Brick OS 7.5c: the request "ytc --bg" plays (bgaudio.cpp). A live clip hands over its HLS manifest and a
+// downloaded one its file, both played as they are (raw); otherwise the audio stream through ytc://.
+bool App::exit_to_background(bool forced) {
+    if (bg_handed_) return true;
+    if (!forced && (!bg_on_exit_ || mode_ != Mode::Playing || player_.paused())) return false;
+    if (!player_.active() || now_playing_item_.video_id.empty()) return false;
+    const std::string& v = playing_video_url_;
+    bool raw = v.find(".m3u8") != std::string::npos || v.find("/manifest/hls") != std::string::npos ||
+               (!v.empty() && v.find("://") == std::string::npos);
+    std::string src = (raw || playing_audio_url_.empty()) ? v : playing_audio_url_;
+    if (src.empty()) return false;
+    auto one_line = [](std::string s) { for (char& c : s) if (c == '\n' || c == '\r') c = ' '; return s; };
+    std::string title = now_playing_title_.empty() ? now_playing_item_.title : now_playing_title_;
+    mkdir("/tmp/ytbg", 0755);
+    FILE* f = std::fopen("/tmp/ytbg/req", "w");
+    if (!f) return false;
+    std::fprintf(f, "audio=%s\nraw=%d\nua=%s\nstart=%.3f\nduration=%.3f\npaced=%d\nvolume=%d\n", src.c_str(),
+                 raw ? 1 : 0, playing_ua_.c_str(), player_.position(), player_.duration(), playing_paced_ ? 1 : 0,
+                 volume_);
+    std::fprintf(f, "id=%s\ntitle=%s\nchannel=%s\nchannel_id=%s\nthumb_url=%s\n", now_playing_item_.video_id.c_str(),
+                 one_line(title).c_str(), one_line(playing_author_.empty() ? now_playing_item_.author : playing_author_).c_str(),
+                 now_playing_item_.channel_id.c_str(), now_playing_item_.thumbnail_url.c_str());
+    std::fclose(f);
+    if (!now_playing_item_.video_id.empty() && player_.position() > 5)
+        it_.set_resume_pos(now_playing_item_.video_id, player_.position());
+    player_.stop();
+    bg_handed_ = true;
+    return true;
+}
+
+void App::resume_background(const std::string& video_id) {
+    std::ifstream in("/tmp/ytbg/last");
+    std::string line;
+    yt::SearchResult v;
+    double pos = 0;
+    bool ended = false;
+    while (std::getline(in, line)) {
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = line.substr(0, eq), val = line.substr(eq + 1);
+        if (k == "id") v.video_id = val;
+        else if (k == "title") v.title = val;
+        else if (k == "channel") v.author = val;
+        else if (k == "channel_id") v.channel_id = val;
+        else if (k == "thumb_url") v.thumbnail_url = val;
+        else if (k == "pos_ms") pos = std::atof(val.c_str()) / 1000.0;
+        else if (k == "ended") ended = val == "1";
+    }
+    if (v.video_id != video_id || ended) return;
+    play_item(v, -1);
+    resume_pos_ = pos;   // play_item started the resolve at 0; poll_resolve applies this
 }
 
 void App::ensure_visible() {

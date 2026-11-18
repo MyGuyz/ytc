@@ -28,6 +28,8 @@
   "SetHidePaced": "Hide Paced Videos",
   "SetAskResume": "Ask to Resume",
   "SetHomeFeed": "Home Feed",
+  "ListenBackground": "Listen in background",
+  "SetBgOnExit": "Keep playing after exit",
   "SetAutoplay": "Autoplay",
   "SetSponsorBlock": "SponsorBlock",
   "SetView": "View",

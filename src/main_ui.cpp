@@ -5,6 +5,7 @@
 // Headless mode uses the SDL "offscreen" driver so the exact GLES2 UI path is
 // exercised with no display, letting us verify the UI visually via screenshots.
 #include "remux.h"
+#include "bgaudio.h"
 #include "ui.h"
 #include "i18n.h"
 #include "innertube.h"
@@ -57,6 +58,7 @@ static ui::App::Action map_button(Uint8 b) {
 
 int main(int argc, char** argv) {
     SDL_SetMainReady();   // pairs with SDL_MAIN_HANDLED
+    if (argc > 2 && std::string(argv[1]) == "--bg") return bgaudio_main(argv[2]);   // Brick OS: sound only
     if (const char* spec = std::getenv("YTC_REMUXTEST")) {   // "video:audio:out" (no SDL)
         std::string s = spec; auto c1 = s.find(':'), c2 = s.rfind(':');
         bool r = ytn::remux_to_mp4(s.substr(0, c1), s.substr(c1 + 1, c2 - c1 - 1), s.substr(c2 + 1));
@@ -112,6 +114,8 @@ int main(int argc, char** argv) {
     } else {
         app.load_home();          // always start on Home (favorite-channel RSS; may be empty)
     }
+    // Brick OS: the sound was playing in the background; reopen its clip where it got to
+    if (const char* rid = std::getenv("YTC_RESUME_ID")) app.resume_background(rid);
 
     if (headless && std::getenv("YTC_EMPTYSHOT")) {
         using AA = ui::App::Action;
@@ -1334,6 +1338,7 @@ int main(int argc, char** argv) {
             }
         }
     }
+    app.exit_to_background(false);   // Brick OS: "Keep playing after exit"
     SDL_StopTextInput();
     if (pad) SDL_GameControllerClose(pad);
     return 0;

@@ -3,6 +3,7 @@
 # from build-deps.sh (mounted at $SYSROOT/opt/ytc), and assemble the app folder in /src/dist.
 set -eo pipefail
 source ~/.bashrc
+SYSROOT=${SYSROOT:-/opt/aarch64-nextui-linux-gnu/aarch64-nextui-linux-gnu/libc}   # newer toolchain images no longer set it
 set -u
 HOST=aarch64-nextui-linux-gnu
 P=$SYSROOT/opt/ytc
