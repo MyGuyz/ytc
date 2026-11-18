@@ -14,6 +14,7 @@
 #include "bgaudio.h"
 #include "stream.h"
 #include "http.h"
+#include "innertube.h"
 #include <mpv/client.h>
 #include <cerrno>
 #include <cmath>
@@ -23,6 +24,8 @@
 #include <cstring>
 #include <fcntl.h>
 #include <map>
+#include <set>
+#include <vector>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -71,6 +74,66 @@ bool get_flag(mpv_handle* mpv, const char* prop) {
     int v = 0;
     mpv_get_property(mpv, prop, MPV_FORMAT_FLAG, &v);
     return v != 0;
+}
+
+// One clip the player has on: what the state file, the HOME panel and YouTube's reopen need.
+struct Clip {
+    std::string id, title, channel, channel_id, thumb_url, thumb;
+};
+
+// The clip's picture for the HOME panel and Music (best effort: the sound is already on).
+std::string fetch_thumb(const std::string& url) {
+    if (url.empty()) return "";
+    HttpClient http;
+    auto r = http.get(url, {}, 8);
+    if (!r.ok() || r.body.empty()) return "";
+    write_atomic(path("thumb.jpg"), r.body);
+    return path("thumb.jpg");
+}
+
+// Autoplay, as YouTube does it (DESIGN.md 7.5c): when a clip ends, YouTube's own recommendation for it, the first
+// related clip not played in this session (no Shorts, no live). Resolves its audio and starts it; false = none.
+bool play_next(mpv_handle* mpv, Clip& cur, std::set<std::string>& played) {
+    const char* cfg = std::getenv("YTC_CONFIG");
+    if (!cfg || cur.id.empty()) return false;
+    try {
+        yt::Innertube it(cfg);
+        std::vector<yt::SearchResult> rel = it.related_videos(cur.id);
+        for (const yt::SearchResult& v : rel) {
+            if (v.video_id.empty() || v.is_short || v.is_live || v.is_channel() || v.is_playlist() || v.is_post() ||
+                played.count(v.video_id))
+                continue;
+            played.insert(v.video_id);
+            yt::VideoInfo info = it.resolve(v.video_id);
+            const yt::Format* a = info.ok() && !info.is_live ? info.best_audio() : nullptr;
+            if (a && !a->url.empty()) {   // a stale session 403s byte 0: refresh it once
+                HttpClient http;
+                if (http.get(a->url, {"Range: bytes=0-0", "User-Agent: " + info.user_agent}, 10).status == 403) {
+                    it.refresh_visitor_data();
+                    info = it.resolve(v.video_id);
+                    a = info.ok() ? info.best_audio() : nullptr;
+                }
+            }
+            if (!a || a->url.empty()) continue;
+            std::string url = ytn::wrap_url(a->url, info.user_agent);
+            mpv_set_property_string(mpv, "user-agent", info.user_agent.c_str());
+            const char* load[] = {"loadfile", url.c_str(), "replace", nullptr};
+            if (mpv_command(mpv, load) < 0) continue;
+            mpv_set_property_string(mpv, "pause", "no");
+            cur.id = v.video_id;
+            cur.title = info.title.empty() ? v.title : info.title;
+            cur.channel = info.author.empty() ? v.author : info.author;
+            cur.channel_id = v.channel_id;
+            cur.thumb_url = v.thumbnail_url;
+            cur.thumb = fetch_thumb(cur.thumb_url);
+            it.add_history(cur.id, cur.title, cur.channel_id, cur.channel);   // as if watched in YouTube
+            std::fprintf(stderr, "[bg] next: %s %s\n", cur.id.c_str(), cur.title.c_str());
+            return true;
+        }
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[bg] next failed: %s\n", e.what());
+    }
+    return false;
 }
 
 }  // namespace
@@ -127,32 +190,26 @@ int bgaudio_main(const char* request_file) {
         return 1;
     }
 
-    // The clip's picture for the HOME panel and Music (best effort: the sound is already on)
-    std::string thumb;
-    if (!req["thumb_url"].empty()) {
-        HttpClient http;
-        auto r = http.get(req["thumb_url"], {}, 8);
-        if (r.ok() && !r.body.empty()) {
-            thumb = path("thumb.jpg");
-            write_atomic(thumb, r.body);
-        }
-    }
-    std::string head = "id=" + req["id"] + "\ntitle=" + req["title"] + "\nchannel=" + req["channel"] +
-                       "\nthumb=" + thumb + "\n";
-    // What YouTube needs to reopen the clip (written to "last" on exit)
-    std::string again = "id=" + req["id"] + "\ntitle=" + req["title"] + "\nchannel=" + req["channel"] +
-                        "\nchannel_id=" + req["channel_id"] + "\nthumb_url=" + req["thumb_url"] + "\n";
+    Clip cur{req["id"], req["title"], req["channel"], req["channel_id"], req["thumb_url"], ""};
+    cur.thumb = fetch_thumb(cur.thumb_url);
+    std::set<std::string> played{cur.id};
     double pos = std::atof(req["start"].c_str()), dur = std::atof(req["duration"].c_str());
     std::string pending;
     bool ended = false;
     while (!g_quit && !ended) {
         mpv_event* e = mpv_wait_event(mpv, 0.5);
+        bool clip_done = false;
         for (; e->event_id != MPV_EVENT_NONE; e = mpv_wait_event(mpv, 0)) {
             if (e->event_id == MPV_EVENT_SHUTDOWN) ended = true;
             if (e->event_id == MPV_EVENT_END_FILE) {
-                auto* ef = (mpv_event_end_file*)e->data;
-                if (ef->reason == MPV_END_FILE_REASON_EOF || ef->reason == MPV_END_FILE_REASON_ERROR) ended = true;
+                auto* ef = (mpv_event_end_file*)e->data;   // STOP is our own "replace": not an end
+                if (ef->reason == MPV_END_FILE_REASON_EOF) clip_done = true;
+                else if (ef->reason == MPV_END_FILE_REASON_ERROR) ended = true;
             }
+        }
+        if (clip_done && !ended) {
+            if (raw || !play_next(mpv, cur, played)) ended = true;   // a live or downloaded clip: no next
+            else { pos = 0; dur = 0; }
         }
         // Commands, one a line.
         char buf[256];
@@ -183,12 +240,14 @@ int bgaudio_main(const char* request_file) {
         char st[96];
         std::snprintf(st, sizeof st, "state=%s\npos_ms=%d\ndur_ms=%d\n",
                       get_flag(mpv, "pause") ? "paused" : "playing", (int)(pos * 1000), (int)(dur * 1000));
-        write_atomic(path("state"), st + head);
+        write_atomic(path("state"), st + ("id=" + cur.id + "\ntitle=" + cur.title + "\nchannel=" + cur.channel +
+                                          "\nthumb=" + cur.thumb + "\n"));
     }
-    // Where the sound got to, for YouTube to reopen the video there.
+    // Where the sound got to (the clip on now), for YouTube to reopen it there.
     char last[64];
     std::snprintf(last, sizeof last, "pos_ms=%d\nended=%d\n", (int)(pos * 1000), ended ? 1 : 0);
-    write_atomic(path("last"), again + last);
+    write_atomic(path("last"), "id=" + cur.id + "\ntitle=" + cur.title + "\nchannel=" + cur.channel +
+                               "\nchannel_id=" + cur.channel_id + "\nthumb_url=" + cur.thumb_url + "\n" + last);
     unlink(path("state").c_str());
     unlink(path("pid").c_str());
     if (cmd_fd >= 0) close(cmd_fd);
