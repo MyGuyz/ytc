@@ -178,14 +178,14 @@ void App::render_upnext(gfx::Renderer& rn) {
     float top = bottom - 24 * u - tf.line_height() - 12 * u - ch - 16 * u - lf.line_height() - 20 * u;
     rn.quad({0, top, (float)W, (float)H - top}, kBg.with_a(0.75f));
     rn.text(lf, i18n::tr(S::UpNext), 40 * u, top + 20 * u, kWhite);
-    int n = (int)upnext_idx_.size();
+    int n = (int)upnext_items_.size();
     float y = top + 20 * u + lf.line_height() + 16 * u;
     // keep the focused card on screen: scroll by whole cards
     int first = std::max(0, upnext_sel_ - (int)((W - 80 * u) / (cw + gap)) + 1);
     for (int k = first; k < n; ++k) {
         float x = 40 * u + (k - first) * (cw + gap);
         if (x > W) break;
-        const yt::SearchResult& v = results_[upnext_idx_[k]];
+        const yt::SearchResult& v = upnext_items_[k];
         gfx::Rect r{x, y, cw, ch};
         bool foc = k == upnext_sel_;
         design_thumb(rn, v, r, 18 * u, foc ? 1.f : 0.6f);

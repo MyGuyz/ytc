@@ -483,10 +483,18 @@ static SearchResult parse_lockup(const json& lv, const std::string& chan_hint) {
                     }
                 }
     }
-    if (const json* badge = find_key(lv, "thumbnailBadgeViewModel"))
+    std::string badge_style;
+    if (const json* badge = find_key(lv, "thumbnailBadgeViewModel")) {
         sr.length_text = badge->value("text", "");
+        badge_style = badge->value("badgeStyle", std::string());
+    }
     sr.length_seconds = parse_duration(sr.length_text);
-    if (sr.length_text == "LIVE" || sr.length_text == "LIVE NOW") sr.is_live = true;
+    // Live: the badge's style, else its text — "LIVE" in English but the UI language's word otherwise
+    // ("ไลฟ์สด"): a badge with no digits is not a length
+    bool has_digit = std::any_of(sr.length_text.begin(), sr.length_text.end(), [](char c) { return c >= '0' && c <= '9'; });
+    if (badge_style.find("LIVE") != std::string::npos || sr.length_text == "LIVE" || sr.length_text == "LIVE NOW" ||
+        (!sr.length_text.empty() && !has_digit))
+        sr.is_live = true;
     if (!sr.video_id.empty())
         sr.thumbnail_url = "https://i.ytimg.com/vi/" + sr.video_id + "/mqdefault.jpg";
     return sr;

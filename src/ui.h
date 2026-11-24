@@ -113,6 +113,11 @@ public:
     ~App();
     void set_results(std::vector<yt::SearchResult> r);
     void test_end_playback(int idx);   // TEST-ONLY: simulate EOF of results_[idx]
+    void test_neighbour(int dir) { play_neighbour(dir); }   // TEST-ONLY: L1 (-1) / R1 (+1) in the player
+    std::string test_now() const {     // TEST-ONLY: the clip on now, its list index, the mode
+        return now_playing_item_.video_id + " [" + std::to_string(now_playing_index_) + "] mode=" +
+               std::to_string((int)mode_) + " " + now_playing_item_.title;
+    }
     void search(const std::string& query);
     void load_home();            // "Home": RSS feed from favorite channels (empty by default)
     void load_favorites();       // favorite channels as tiles (local channels.json)
@@ -539,11 +544,22 @@ private:
     std::thread cast_cmd_thread_;
     std::atomic<bool> cast_cmd_running_{false};
     int  now_playing_index_ = -1;          // index in results_ the playing video came from
-    std::thread rel_thread_;               // async /next related fetch (end-of-list fallback)
+    // DESIGN 7.7 "next": YouTube's own recommendations for the playing clip (/next), fetched while it plays
+    std::thread rel_thread_;
     std::atomic<bool> rel_running_{false}, rel_done_{false};
     std::mutex rel_m_;
     std::vector<yt::SearchResult> rel_pending_;
-    bool rel_autoplay_pending_ = false;    // a related-autoplay fetch is in flight
+    std::string rel_pending_for_;          // the clip rel_pending_ is for
+    std::string rec_for_;                  // the clip rec_ is for
+    std::vector<yt::SearchResult> rec_;    // its recommendations
+    std::unordered_set<std::string> played_ids_;   // clips played in this run: never picked as "next" again
+    std::vector<std::pair<yt::SearchResult, int>> back_stack_;   // L1: the clips played before this one
+    bool rec_wait_ = false, rec_wait_ended_ = false;   // "next" asked for before rec_ arrived
+    bool keeps_order() const;              // a playlist, Watch Later, Downloads: "next" is the list's next
+    void prefetch_rec(const std::string& video_id);
+    const yt::SearchResult* pick_rec() const;   // the first recommendation not played yet, or null
+    void play_rec(bool ended);             // R1 / the clip ended: YouTube's next
+    void play_forward(const yt::SearchResult& v, int index);   // play_item, remembering this one for L1
     // Staged autoplay: after a video ends we wait for the last popup to clear, show an
     // "Up next: <title>" popup on the grid, then start the next video.
     enum class AutoState { None, WaitClear, ShowUpNext };
@@ -556,7 +572,6 @@ private:
     void arm_upnext(const yt::SearchResult& v, int index);  // stage the up-next sequence
     void step_autoplay();                  // WaitClear -> ShowUpNext -> play (in pump_async)
     void cancel_autoplay();                // any user input during the countdown cancels it
-    void start_related_autoplay(const std::string& video_id);
     void poll_related_autoplay();
     void play_item(const yt::SearchResult& v, int index);  // launch a video (no resume prompt)
 
@@ -795,7 +810,8 @@ private:
     void render_quit_prompt(gfx::Renderer& rn);
     double stall_pos_ = 0; unsigned stall_since_ = 0; bool stall_moved_ = false;  // made-for-kids wall
     // DESIGN 7.7: the "next" row (Down in the player); 7.8: Shorts mode
-    bool upnext_open_ = false; int upnext_sel_ = 0; std::vector<int> upnext_idx_;
+    bool upnext_open_ = false; int upnext_sel_ = 0;
+    std::vector<yt::SearchResult> upnext_items_; std::vector<int> upnext_idx_;   // the row's clips; list index or -1
     bool shorts_mode_ = false; unsigned shorts_anim_at_ = 0; int shorts_anim_dir_ = 0;
     std::string shorts_prev_thumb_; int cc_last_ = 0;
     int neighbour_index(int dir) const;

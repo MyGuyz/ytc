@@ -328,6 +328,30 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "POSTVIDTEST done\n");
             return 0;
         }
+        if (std::getenv("YTC_NEXTTEST")) {   // DESIGN 7.7 "next": R1 / L1 / ▼ / the end take YouTube's next
+            auto settle = [&](int ms){ int w=0; do { app.pump_async(); app.render(rn);
+                win->swap(); SDL_Delay(50); w+=50; } while (w<ms); };
+            std::vector<yt::SearchResult> rs(2);
+            rs[0].video_id = "kJQP7kiw5Fk"; rs[0].title = "list item 0";
+            rs[1].video_id = "dQw4w9WgXcQ"; rs[1].title = "list item 1 (must NOT be R1's pick)";
+            settle(6000);   // the start-up feed first, so it can't replace this list
+            app.set_results(rs);
+            settle(500);
+            auto now = [&](const char* what) { std::fprintf(stderr, "NEXTTEST %s: %s\n", what, app.test_now().c_str()); };
+            app.input(ui::App::Action::Select); settle(9000); now("A on item 0");
+            app.test_neighbour(+1); settle(9000); now("R1");
+            app.render(rn); win->screenshot(std::string(shot) + "_r1.png");
+            app.test_neighbour(+1); settle(9000); now("R1 again");
+            app.input(ui::App::Action::Down); settle(1500);
+            app.render(rn); win->screenshot(std::string(shot) + "_row.png");
+            app.input(ui::App::Action::Back); settle(200);
+            app.test_neighbour(-1); settle(9000); now("L1");
+            app.test_neighbour(-1); settle(9000); now("L1 again");
+            app.test_neighbour(-1); settle(3000); now("L1 at the first (list's previous: none)");
+            app.test_end_playback(-1); settle(12000); now("clip ended (autoplay on)");
+            std::fprintf(stderr, "NEXTTEST done\n");
+            return 0;
+        }
         if (std::getenv("YTC_AUTOPLAYSEQ")) {
             std::vector<yt::SearchResult> rs(2);
             rs[0].video_id = "aaaaaaaaaaa"; rs[0].title = "First Video (just ended)";

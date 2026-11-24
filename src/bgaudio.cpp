@@ -91,9 +91,36 @@ std::string fetch_thumb(const std::string& url) {
     return path("thumb.jpg");
 }
 
-// Autoplay, as YouTube does it (DESIGN.md 7.5c): when a clip ends, YouTube's own recommendation for it, the first
-// related clip not played in this session (no Shorts, no live). Resolves its audio and starts it; false = none.
-bool play_next(mpv_handle* mpv, Clip& cur, std::set<std::string>& played) {
+// Resolve clip c's audio and start it in place of the one on now; on success cur becomes c. false = can't.
+bool load_clip(mpv_handle* mpv, yt::Innertube& it, const Clip& c, Clip& cur) {
+    yt::VideoInfo info = it.resolve(c.id);
+    const yt::Format* a = info.ok() && !info.is_live ? info.best_audio() : nullptr;
+    if (a && !a->url.empty()) {   // a stale session 403s byte 0: refresh it once
+        HttpClient http;
+        if (http.get(a->url, {"Range: bytes=0-0", "User-Agent: " + info.user_agent}, 10).status == 403) {
+            it.refresh_visitor_data();
+            info = it.resolve(c.id);
+            a = info.ok() ? info.best_audio() : nullptr;
+        }
+    }
+    if (!a || a->url.empty()) return false;
+    std::string url = ytn::wrap_url(a->url, info.user_agent);
+    mpv_set_property_string(mpv, "user-agent", info.user_agent.c_str());
+    const char* load[] = {"loadfile", url.c_str(), "replace", nullptr};
+    if (mpv_command(mpv, load) < 0) return false;
+    mpv_set_property_string(mpv, "pause", "no");
+    cur = c;
+    if (!info.title.empty()) cur.title = info.title;
+    if (!info.author.empty()) cur.channel = info.author;
+    cur.thumb = fetch_thumb(cur.thumb_url);
+    it.add_history(cur.id, cur.title, cur.channel_id, cur.channel);   // as if watched in YouTube
+    std::fprintf(stderr, "[bg] now: %s %s\n", cur.id.c_str(), cur.title.c_str());
+    return true;
+}
+
+// YouTube's next, as YouTube does it (DESIGN.md 7.5c): when a clip ends, or on ⏭, YouTube's own recommendation for
+// it, the first related clip not played in this run (no Shorts, no live). back gets the clip it replaces (⏮).
+bool play_next(mpv_handle* mpv, Clip& cur, std::set<std::string>& played, std::vector<Clip>& back) {
     const char* cfg = std::getenv("YTC_CONFIG");
     if (!cfg || cur.id.empty()) return false;
     try {
@@ -104,34 +131,30 @@ bool play_next(mpv_handle* mpv, Clip& cur, std::set<std::string>& played) {
                 played.count(v.video_id))
                 continue;
             played.insert(v.video_id);
-            yt::VideoInfo info = it.resolve(v.video_id);
-            const yt::Format* a = info.ok() && !info.is_live ? info.best_audio() : nullptr;
-            if (a && !a->url.empty()) {   // a stale session 403s byte 0: refresh it once
-                HttpClient http;
-                if (http.get(a->url, {"Range: bytes=0-0", "User-Agent: " + info.user_agent}, 10).status == 403) {
-                    it.refresh_visitor_data();
-                    info = it.resolve(v.video_id);
-                    a = info.ok() ? info.best_audio() : nullptr;
-                }
+            Clip was = cur;
+            if (load_clip(mpv, it, Clip{v.video_id, v.title, v.author, v.channel_id, v.thumbnail_url, ""}, cur)) {
+                back.push_back(was);
+                return true;
             }
-            if (!a || a->url.empty()) continue;
-            std::string url = ytn::wrap_url(a->url, info.user_agent);
-            mpv_set_property_string(mpv, "user-agent", info.user_agent.c_str());
-            const char* load[] = {"loadfile", url.c_str(), "replace", nullptr};
-            if (mpv_command(mpv, load) < 0) continue;
-            mpv_set_property_string(mpv, "pause", "no");
-            cur.id = v.video_id;
-            cur.title = info.title.empty() ? v.title : info.title;
-            cur.channel = info.author.empty() ? v.author : info.author;
-            cur.channel_id = v.channel_id;
-            cur.thumb_url = v.thumbnail_url;
-            cur.thumb = fetch_thumb(cur.thumb_url);
-            it.add_history(cur.id, cur.title, cur.channel_id, cur.channel);   // as if watched in YouTube
-            std::fprintf(stderr, "[bg] next: %s %s\n", cur.id.c_str(), cur.title.c_str());
-            return true;
         }
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[bg] next failed: %s\n", e.what());
+    }
+    return false;
+}
+
+// ⏮: the clip played before this one (from its start); false = none
+bool play_prev(mpv_handle* mpv, Clip& cur, std::vector<Clip>& back) {
+    const char* cfg = std::getenv("YTC_CONFIG");
+    if (!cfg || back.empty()) return false;
+    try {
+        yt::Innertube it(cfg);
+        Clip c = back.back();
+        if (!load_clip(mpv, it, c, cur)) return false;
+        back.pop_back();
+        return true;
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "[bg] prev failed: %s\n", e.what());
     }
     return false;
 }
@@ -193,6 +216,7 @@ int bgaudio_main(const char* request_file) {
     Clip cur{req["id"], req["title"], req["channel"], req["channel_id"], req["thumb_url"], ""};
     cur.thumb = fetch_thumb(cur.thumb_url);
     std::set<std::string> played{cur.id};
+    std::vector<Clip> back;   // ⏮: the clips played before
     double pos = std::atof(req["start"].c_str()), dur = std::atof(req["duration"].c_str());
     std::string pending;
     bool ended = false;
@@ -208,7 +232,7 @@ int bgaudio_main(const char* request_file) {
             }
         }
         if (clip_done && !ended) {
-            if (raw || !play_next(mpv, cur, played)) ended = true;   // a live or downloaded clip: no next
+            if (raw || !play_next(mpv, cur, played, back)) ended = true;   // a live or downloaded clip: no next
             else { pos = 0; dur = 0; }
         }
         // Commands, one a line.
@@ -222,7 +246,14 @@ int bgaudio_main(const char* request_file) {
             if (c == "stop") g_quit = 1;
             else if (c == "play") mpv_set_property_string(mpv, "pause", "no");
             else if (c == "pause") mpv_set_property_string(mpv, "pause", "yes");
-            else if (c == "toggle") {
+            else if (c == "next") {   // ⏭: YouTube's next now (a live or downloaded clip has none)
+                if (!raw && play_next(mpv, cur, played, back)) { pos = 0; dur = 0; }
+            } else if (c == "prev") {   // ⏮: past 5 s back to the start, else the clip before
+                if (pos > 5 || raw || !play_prev(mpv, cur, back)) {
+                    const char* sk[] = {"seek", "0", "absolute", nullptr};
+                    mpv_command(mpv, sk);
+                } else { pos = 0; dur = 0; }
+            } else if (c == "toggle") {
                 const char* cy[] = {"cycle", "pause", nullptr};
                 mpv_command(mpv, cy);
             } else if (c.rfind("seek ", 0) == 0) {

@@ -3679,10 +3679,11 @@ void App::input(Action a) {
                 case Action::Select:
                     if (upnext_sel_ < n && !resolve_running_) {
                         int i = upnext_idx_[upnext_sel_];
+                        yt::SearchResult v = upnext_items_[upnext_sel_];
                         upnext_open_ = false;
                         save_resume_position(); player_.stop(); has_pending_seek_ = false; pending_seek_ = 0;
-                        sel_ = i;
-                        play_item(results_[i], i);
+                        if (i >= 0) sel_ = i;
+                        play_forward(v, i);
                     }
                     break;
                 case Action::Back: case Action::Up: case Action::Down: upnext_open_ = false; break;
@@ -4142,13 +4143,28 @@ int App::neighbour_index(int dir) const {
     return -1;
 }
 
+// L1/R1 (DESIGN 7.7): R1 = YouTube's next for this clip (in a playlist, Watch Later, Downloads: the list's next);
+// L1 = the clip played before this one, else the list's previous. Shorts mode: the list's Shorts, as before.
 void App::play_neighbour(int dir) {
     if (resolve_running_ || mode_ != Mode::Playing) return;
+    if (!shorts_mode_ && dir < 0 && !back_stack_.empty()) {
+        save_resume_position(); player_.stop(); has_pending_seek_ = false; pending_seek_ = 0;
+        auto prev = back_stack_.back();
+        back_stack_.pop_back();
+        if (prev.second >= 0 && prev.second < (int)results_.size()) sel_ = prev.second;
+        play_item(prev.first, prev.second);
+        return;
+    }
+    if (!shorts_mode_ && dir > 0 && !keeps_order() && !now_playing_item_.video_id.empty()) {
+        save_resume_position(); player_.stop(); has_pending_seek_ = false; pending_seek_ = 0;
+        play_rec(false);
+        return;
+    }
     int i = neighbour_index(dir);
     if (i < 0) {
-        if (dir > 0 && !shorts_mode_ && !now_playing_item_.video_id.empty()) {   // end of the list: related
+        if (dir > 0 && !shorts_mode_ && !now_playing_item_.video_id.empty()) {   // end of the list: YouTube's next
             save_resume_position(); player_.stop(); has_pending_seek_ = false; pending_seek_ = 0;
-            start_related_autoplay(now_playing_item_.video_id);
+            play_rec(false);
             return;
         }
         status_msg_ = i18n::tr(dir < 0 ? i18n::Str::FirstClip
@@ -4163,7 +4179,8 @@ void App::play_neighbour(int dir) {
         shorts_prev_thumb_ = now_playing_item_.thumbnail_url;
     }
     sel_ = i;   // B lands on it; near the end of the list this pages more in (maybe_load_more)
-    play_item(results_[i], i);
+    if (shorts_mode_) play_item(results_[i], i);
+    else play_forward(results_[i], i);
 }
 
 // X in the player: captions off, or back on (the last track, else the first)
@@ -4182,16 +4199,29 @@ void App::toggle_captions() {
     status_until_ = SDL_GetTicks() + 2000;
 }
 
-// Down in the player: the next clips of the list in a row from the bottom
+// Down in the player: the next clips in a row from the bottom — YouTube's recommendations for this clip
+// (not played yet), or the list's next ones where the list keeps its order
 void App::open_upnext() {
-    upnext_idx_.clear();
-    for (int i = now_playing_index_ < 0 ? (int)results_.size() : now_playing_index_ + 1;
-         i < (int)results_.size() && upnext_idx_.size() < 10; ++i) {
-        const yt::SearchResult& v = results_[i];
-        if (v.video_id.empty() || v.is_channel() || v.is_playlist() || v.is_post()) continue;
-        upnext_idx_.push_back(i);
+    upnext_items_.clear(); upnext_idx_.clear();
+    if (keeps_order()) {
+        for (int i = now_playing_index_ < 0 ? (int)results_.size() : now_playing_index_ + 1;
+             i < (int)results_.size() && upnext_idx_.size() < 10; ++i) {
+            const yt::SearchResult& v = results_[i];
+            if (v.video_id.empty() || v.is_channel() || v.is_playlist() || v.is_post()) continue;
+            upnext_items_.push_back(v); upnext_idx_.push_back(i);
+        }
+    } else if (rec_for_ == now_playing_item_.video_id) {
+        for (const yt::SearchResult& v : rec_) {
+            if (upnext_items_.size() >= 10) break;
+            if (v.video_id.empty() || v.is_short || v.is_live || played_ids_.count(v.video_id)) continue;
+            upnext_items_.push_back(v); upnext_idx_.push_back(-1);
+        }
+    } else {   // not in yet (it is fetched as the clip starts)
+        prefetch_rec(now_playing_item_.video_id);
+        status_msg_ = i18n::tr(i18n::Str::FindingNext); status_until_ = SDL_GetTicks() + 2000;
+        return;
     }
-    if (upnext_idx_.empty()) {
+    if (upnext_items_.empty()) {
         status_msg_ = i18n::tr(i18n::Str::NoMoreVideos); status_until_ = SDL_GetTicks() + 2000;
         return;
     }
@@ -5057,6 +5087,7 @@ void App::request_playback() {
     shorts_mode_ = v->is_short; shorts_anim_at_ = 0; upnext_open_ = false;
     now_playing_item_ = *v;                      // context for the player options menu
     now_playing_index_ = sel_;                   // remember list position (for autoplay)
+    back_stack_.clear();                         // a clip picked from the list: L1 walks the list again
     stats_for_nerds_ = false;                    // per-video: reset for each new video
     playback_speed_ = 1.0;                       // per-video: speed back to normal
     audio_override_lang_.clear();                // per-video: back to the global default
@@ -5122,9 +5153,11 @@ void App::handle_playback_ended() {
         return;
     }
     if (!autoplay_) { mode_ = Mode::Grid; return; }
-    int idx = find_next_playable(now_playing_index_);
-    if (idx >= 0) { arm_upnext(results_[idx], idx); return; }  // next in the current list
-    start_related_autoplay(now_playing_item_.video_id);        // end of list -> related
+    if (keeps_order()) {
+        int idx = find_next_playable(now_playing_index_);
+        if (idx >= 0) { arm_upnext(results_[idx], idx); return; }  // next in the list
+    }
+    play_rec(true);                                            // YouTube's next for it
 }
 
 // Index of the next playable video row after from_index in results_, or -1.
@@ -5161,42 +5194,85 @@ void App::step_autoplay() {
     } else if (auto_state_ == AutoState::ShowUpNext) {
         if (now < auto_show_until_) return;                        // let "Up next" show
         auto_state_ = AutoState::None;
-        play_item(auto_next_item_, auto_next_index_);              // now start the next video
+        play_forward(auto_next_item_, auto_next_index_);           // now start the next video
     }
 }
 void App::cancel_autoplay() {
     if (auto_state_ != AutoState::None) { auto_state_ = AutoState::None; status_msg_.clear(); }
 }
 
-// End of list: fetch related videos off-thread, then arm the up-next sequence.
-void App::start_related_autoplay(const std::string& video_id) {
-    if (video_id.empty()) { mode_ = Mode::Grid; return; }
-    if (rel_running_) { mode_ = Mode::Grid; return; }   // a related fetch is already running
-    mode_ = Mode::Loading;
-    status_msg_ = i18n::tr(i18n::Str::FindingNext); status_until_ = SDL_GetTicks() + 6000;
-    rel_autoplay_pending_ = true;
+// ---- DESIGN 7.7 "next" (2026-11-24, the user's ask): what YouTube itself plays next ----
+// Outside a list that keeps its order, R1, the clip ending (autoplay) and the "next" row all take YouTube's own
+// recommendations for the playing clip (/next, the "Up next" column), skipping what this run already played, Shorts
+// and live: one clip leads to the next, as on YouTube, instead of walking the list the clip was picked from.
+bool App::keeps_order() const {
+    return (in_channel_view_ && !subview_playlist_.empty()) || view_label_ == "Watch Later" ||
+           view_label_ == "Downloads";
+}
+
+// Fetch the recommendations for video_id off-thread (as its clip starts); poll_related_autoplay takes them in.
+void App::prefetch_rec(const std::string& video_id) {
+    if (video_id.empty() || rec_for_ == video_id || rel_running_) return;   // a running one is re-asked when done
     if (rel_thread_.joinable()) rel_thread_.join();   // finished -> instant
     rel_running_ = true; rel_done_ = false;
     rel_thread_ = std::thread([this, video_id]() {
         std::vector<yt::SearchResult> r;
         try { r = it_.related_videos(video_id); } catch (...) {}
-        { std::lock_guard<std::mutex> lk(rel_m_); rel_pending_ = std::move(r); }
+        { std::lock_guard<std::mutex> lk(rel_m_); rel_pending_ = std::move(r); rel_pending_for_ = video_id; }
         rel_running_ = false; rel_done_ = true;
     });
 }
+
+const yt::SearchResult* App::pick_rec() const {
+    if (rec_for_.empty() || rec_for_ != now_playing_item_.video_id) return nullptr;
+    for (const yt::SearchResult& v : rec_)
+        if (!v.video_id.empty() && !v.is_short && !v.is_live && !played_ids_.count(v.video_id)) return &v;
+    return nullptr;
+}
+
+void App::play_forward(const yt::SearchResult& v, int index) {
+    if (!now_playing_item_.video_id.empty() && now_playing_item_.video_id != v.video_id) {
+        back_stack_.emplace_back(now_playing_item_, now_playing_index_);
+        if (back_stack_.size() > 50) back_stack_.erase(back_stack_.begin());
+    }
+    play_item(v, index);
+}
+
+// ended: the clip finished (autoplay: "ถัดไป: …" on the list, then it plays); else R1 (plays at once).
+void App::play_rec(bool ended) {
+    const std::string& id = now_playing_item_.video_id;
+    if (const yt::SearchResult* p = pick_rec()) {
+        yt::SearchResult v = *p;
+        rec_wait_ = false;
+        if (ended) arm_upnext(v, -1);
+        else play_forward(v, -1);
+        return;
+    }
+    if (rec_for_ == id && !rel_running_) {   // in, and nothing left in it
+        rec_wait_ = false;
+        if (ended || mode_ == Mode::Loading) mode_ = Mode::Grid;
+        status_msg_ = i18n::tr(i18n::Str::NoMoreVideos); status_until_ = SDL_GetTicks() + 2500;
+        return;
+    }
+    rec_wait_ = true; rec_wait_ended_ = ended;   // not in yet: wait for it
+    mode_ = Mode::Loading;
+    status_msg_ = i18n::tr(i18n::Str::FindingNext); status_until_ = SDL_GetTicks() + 6000;
+    prefetch_rec(id);
+}
+
 void App::poll_related_autoplay() {
     if (!rel_done_.exchange(false)) return;
-    std::vector<yt::SearchResult> r;
-    { std::lock_guard<std::mutex> lk(rel_m_); r = std::move(rel_pending_); rel_pending_.clear(); }
-    // If the user navigated away (Back left Loading), or autoplay was cancelled, drop it.
-    if (!rel_autoplay_pending_ || mode_ != Mode::Loading) { rel_autoplay_pending_ = false; return; }
-    rel_autoplay_pending_ = false;
-    if (r.empty()) { mode_ = Mode::Grid; status_msg_ = i18n::tr(i18n::Str::NoMoreVideos);
-                     status_until_ = SDL_GetTicks() + 2500; return; }
-    // Replace the list with the related set so subsequent autoplay chains through it,
-    // then arm the same staged up-next sequence.
-    results_ = std::move(r);
-    arm_upnext(results_[0], 0);
+    {
+        std::lock_guard<std::mutex> lk(rel_m_);
+        if (!rel_pending_for_.empty()) { rec_ = std::move(rel_pending_); rec_for_ = rel_pending_for_; }
+        rel_pending_.clear(); rel_pending_for_.clear();
+    }
+    // A clip started while that fetch ran: fetch its own now
+    if (rec_for_ != now_playing_item_.video_id && !shorts_mode_ && (mode_ == Mode::Playing || rec_wait_))
+        prefetch_rec(now_playing_item_.video_id);
+    if (!rec_wait_) return;
+    if (mode_ != Mode::Loading) { rec_wait_ = false; return; }   // B left the wait
+    if (rec_for_ == now_playing_item_.video_id) play_rec(rec_wait_ended_);
 }
 
 // Save (or clear) the current playback position for ask-to-resume. Called when
@@ -5327,6 +5403,8 @@ void App::start_resolve(const std::string& video_id, const std::string& title, d
         return;
     }
     if (resolve_running_) return;               // one resolve at a time
+    played_ids_.insert(video_id);                // DESIGN 7.7: never YouTube's "next" again in this run
+    if (!shorts_mode_ && !keeps_order()) prefetch_rec(video_id);   // its "next", ready for R1 / the end
     status_msg_.clear();
     loading_title_ = title;
     resume_pos_ = start_pos;                     // applied in poll_resolve after play()
