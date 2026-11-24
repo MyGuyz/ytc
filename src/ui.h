@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <chrono>
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -550,6 +551,18 @@ private:
     std::mutex rel_m_;
     std::vector<yt::SearchResult> rel_pending_;
     std::string rel_pending_for_;          // the clip rel_pending_ is for
+    // DESIGN 7.7 "next": the stream of YouTube's next clip, found while this one plays, so R1 and the end start it
+    // without the ~2-4 s resolve. Its own Innertube (it_ belongs to the resolve thread).
+    std::string config_path_;
+    std::thread pre_thread_;
+    std::atomic<bool> pre_running_{false};
+    std::mutex pre_m_;
+    std::string pre_id_;                   // the clip pre_info_ is
+    yt::VideoInfo pre_info_;
+    bool pre_ok_ = false;
+    std::chrono::steady_clock::time_point pre_made_;
+    void preresolve(const std::string& video_id);
+    bool take_preresolved(const std::string& video_id, yt::VideoInfo& info);
     std::string rec_for_;                  // the clip rec_ is for
     std::vector<yt::SearchResult> rec_;    // its recommendations
     std::unordered_set<std::string> played_ids_;   // clips played in this run: never picked as "next" again

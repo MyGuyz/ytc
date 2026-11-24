@@ -23,7 +23,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
+#include <atomic>
+#include <chrono>
 #include <map>
+#include <memory>
+#include <thread>
 #include <set>
 #include <vector>
 #include <string>
@@ -91,8 +95,16 @@ std::string fetch_thumb(const std::string& url) {
     return path("thumb.jpg");
 }
 
-// Resolve clip c's audio and start it in place of the one on now; on success cur becomes c. false = can't.
-bool load_clip(mpv_handle* mpv, yt::Innertube& it, const Clip& c, Clip& cur) {
+// A clip ready to play: its audio stream found, its picture fetched.
+struct Prepared {
+    bool ok = false;
+    Clip clip;
+    std::string url, ua, picture;   // url: wrapped for the ytc:// fetcher; picture: the thumbnail's bytes
+};
+
+// Find clip c's audio stream (and its picture). Network only: safe on any thread with its own Innertube.
+Prepared resolve_clip(yt::Innertube& it, const Clip& c) {
+    Prepared p;
     yt::VideoInfo info = it.resolve(c.id);
     const yt::Format* a = info.ok() && !info.is_live ? info.best_audio() : nullptr;
     if (a && !a->url.empty()) {   // a stale session 403s byte 0: refresh it once
@@ -103,55 +115,112 @@ bool load_clip(mpv_handle* mpv, yt::Innertube& it, const Clip& c, Clip& cur) {
             a = info.ok() ? info.best_audio() : nullptr;
         }
     }
-    if (!a || a->url.empty()) return false;
-    std::string url = ytn::wrap_url(a->url, info.user_agent);
-    mpv_set_property_string(mpv, "user-agent", info.user_agent.c_str());
-    const char* load[] = {"loadfile", url.c_str(), "replace", nullptr};
+    if (!a || a->url.empty()) return p;
+    p.url = ytn::wrap_url(a->url, info.user_agent);
+    p.ua = info.user_agent;
+    p.clip = c;
+    if (!info.title.empty()) p.clip.title = info.title;
+    if (!info.author.empty()) p.clip.channel = info.author;
+    if (!c.thumb_url.empty()) {
+        HttpClient http;
+        auto r = http.get(c.thumb_url, {}, 8);
+        if (r.ok()) p.picture = r.body;
+    }
+    p.ok = true;
+    return p;
+}
+
+// Start a prepared clip in place of the one on now; cur becomes it.
+bool start_clip(mpv_handle* mpv, const Prepared& p, Clip& cur) {
+    mpv_set_property_string(mpv, "user-agent", p.ua.c_str());
+    const char* load[] = {"loadfile", p.url.c_str(), "replace", nullptr};
     if (mpv_command(mpv, load) < 0) return false;
     mpv_set_property_string(mpv, "pause", "no");
-    cur = c;
-    if (!info.title.empty()) cur.title = info.title;
-    if (!info.author.empty()) cur.channel = info.author;
-    cur.thumb = fetch_thumb(cur.thumb_url);
-    it.add_history(cur.id, cur.title, cur.channel_id, cur.channel);   // as if watched in YouTube
+    cur = p.clip;
+    cur.thumb.clear();
+    if (!p.picture.empty()) {
+        write_atomic(path("thumb.jpg"), p.picture);
+        cur.thumb = path("thumb.jpg");
+    }
     std::fprintf(stderr, "[bg] now: %s %s\n", cur.id.c_str(), cur.title.c_str());
     return true;
 }
 
-// YouTube's next, as YouTube does it (DESIGN.md 7.5c): when a clip ends, or on ⏭, YouTube's own recommendation for
-// it, the first related clip not played in this run (no Shorts, no live). back gets the clip it replaces (⏮).
-bool play_next(mpv_handle* mpv, Clip& cur, std::set<std::string>& played, std::vector<Clip>& back) {
-    const char* cfg = std::getenv("YTC_CONFIG");
-    if (!cfg || cur.id.empty()) return false;
-    try {
-        yt::Innertube it(cfg);
-        std::vector<yt::SearchResult> rel = it.related_videos(cur.id);
-        for (const yt::SearchResult& v : rel) {
-            if (v.video_id.empty() || v.is_short || v.is_live || v.is_channel() || v.is_playlist() || v.is_post() ||
-                played.count(v.video_id))
-                continue;
-            played.insert(v.video_id);
-            Clip was = cur;
-            if (load_clip(mpv, it, Clip{v.video_id, v.title, v.author, v.channel_id, v.thumbnail_url, ""}, cur)) {
-                back.push_back(was);
-                return true;
+// YouTube's next, found while the clip before it plays, so ⏭ and a clip's end only switch the stream (was ~5 s of
+// network after the press: recommendations, then the stream, then the picture). One job per clip on; a job left
+// behind by ⏭⏭ finishes on its own and is dropped.
+struct NextJob {
+    std::string for_id;   // the clip it is the next of
+    std::atomic<bool> done{false};
+    Prepared next;
+    std::chrono::steady_clock::time_point made;
+};
+
+// for_clip's next (DESIGN.md 7.5c): YouTube's own recommendation for it, the first related clip not played in this
+// run (no Shorts, no live). history: count for_clip as watched in YouTube first (a clip ⏭ or ⏮ started).
+std::shared_ptr<NextJob> find_next(const Clip& for_clip, std::set<std::string> played, bool history) {
+    auto job = std::make_shared<NextJob>();
+    job->for_id = for_clip.id;
+    std::thread([job, for_clip, played, history] {
+        try {
+            const char* cfg = std::getenv("YTC_CONFIG");
+            if (cfg && !for_clip.id.empty()) {
+                yt::Innertube it(cfg);
+                if (history) it.add_history(for_clip.id, for_clip.title, for_clip.channel_id, for_clip.channel);
+                for (const yt::SearchResult& v : it.related_videos(for_clip.id)) {
+                    if (v.video_id.empty() || v.is_short || v.is_live || v.is_channel() || v.is_playlist() ||
+                        v.is_post() || played.count(v.video_id))
+                        continue;
+                    Prepared p = resolve_clip(it, Clip{v.video_id, v.title, v.author, v.channel_id, v.thumbnail_url, ""});
+                    if (p.ok) {
+                        job->next = std::move(p);
+                        break;
+                    }
+                }
             }
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[bg] next of %s failed: %s\n", for_clip.id.c_str(), e.what());
         }
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "[bg] next failed: %s\n", e.what());
+        job->made = std::chrono::steady_clock::now();
+        job->done = true;
+    }).detach();
+    return job;
+}
+
+// Wait for a job (it is usually long done); false when it found nothing or its stream may have expired.
+bool job_ready(const std::shared_ptr<NextJob>& job) {
+    for (int i = 0; i < 200 && !job->done && !g_quit; i++) usleep(100000);   // at most 20 s
+    return job->done && job->next.ok && std::chrono::steady_clock::now() - job->made < std::chrono::hours(2);
+}
+
+// ⏭ or the clip's end: YouTube's next. back gets the clip it replaces (⏮); job becomes the new clip's next.
+bool play_next(mpv_handle* mpv, Clip& cur, std::set<std::string>& played, std::vector<Clip>& back,
+               std::shared_ptr<NextJob>& job) {
+    if (cur.id.empty()) return false;
+    if (!job || job->for_id != cur.id) job = find_next(cur, played, false);
+    if (!job_ready(job)) {   // found nothing, or found it hours ago: look again now
+        job = find_next(cur, played, false);
+        if (!job_ready(job)) return false;
     }
-    return false;
+    Clip was = cur;
+    if (!start_clip(mpv, job->next, cur)) return false;
+    played.insert(cur.id);
+    back.push_back(was);
+    job = find_next(cur, played, true);
+    return true;
 }
 
 // ⏮: the clip played before this one (from its start); false = none
-bool play_prev(mpv_handle* mpv, Clip& cur, std::vector<Clip>& back) {
+bool play_prev(mpv_handle* mpv, Clip& cur, std::set<std::string>& played, std::vector<Clip>& back,
+               std::shared_ptr<NextJob>& job) {
     const char* cfg = std::getenv("YTC_CONFIG");
     if (!cfg || back.empty()) return false;
     try {
         yt::Innertube it(cfg);
-        Clip c = back.back();
-        if (!load_clip(mpv, it, c, cur)) return false;
+        Prepared p = resolve_clip(it, back.back());
+        if (!p.ok || !start_clip(mpv, p, cur)) return false;
         back.pop_back();
+        job = find_next(cur, played, true);
         return true;
     } catch (const std::exception& e) {
         std::fprintf(stderr, "[bg] prev failed: %s\n", e.what());
@@ -217,6 +286,8 @@ int bgaudio_main(const char* request_file) {
     cur.thumb = fetch_thumb(cur.thumb_url);
     std::set<std::string> played{cur.id};
     std::vector<Clip> back;   // ⏮: the clips played before
+    std::shared_ptr<NextJob> job;   // YouTube's next of the clip on, found while it plays
+    if (!raw) job = find_next(cur, played, false);
     double pos = std::atof(req["start"].c_str()), dur = std::atof(req["duration"].c_str());
     std::string pending;
     bool ended = false;
@@ -232,7 +303,7 @@ int bgaudio_main(const char* request_file) {
             }
         }
         if (clip_done && !ended) {
-            if (raw || !play_next(mpv, cur, played, back)) ended = true;   // a live or downloaded clip: no next
+            if (raw || !play_next(mpv, cur, played, back, job)) ended = true;   // a live or downloaded clip: no next
             else { pos = 0; dur = 0; }
         }
         // Commands, one a line.
@@ -247,9 +318,9 @@ int bgaudio_main(const char* request_file) {
             else if (c == "play") mpv_set_property_string(mpv, "pause", "no");
             else if (c == "pause") mpv_set_property_string(mpv, "pause", "yes");
             else if (c == "next") {   // ⏭: YouTube's next now (a live or downloaded clip has none)
-                if (!raw && play_next(mpv, cur, played, back)) { pos = 0; dur = 0; }
+                if (!raw && play_next(mpv, cur, played, back, job)) { pos = 0; dur = 0; }
             } else if (c == "prev") {   // ⏮: past 5 s back to the start, else the clip before
-                if (pos > 5 || raw || !play_prev(mpv, cur, back)) {
+                if (pos > 5 || raw || !play_prev(mpv, cur, played, back, job)) {
                     const char* sk[] = {"seek", "0", "absolute", nullptr};
                     mpv_command(mpv, sk);
                 } else { pos = 0; dur = 0; }

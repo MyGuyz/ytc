@@ -467,6 +467,7 @@ static std::string dir_of(const std::string& path) {
 }
 App::App(const std::string& config_path, gfx::Window* win)
     : win_(win), it_(config_path), cast_(dir_of(config_path)) {
+    config_path_ = config_path;
     load_fonts();
     cols_ = compute_columns();
     // YTC_VIEW / YTC_CAROUSEL (a launcher's pick) are the DEFAULT until the user picks a view in
@@ -579,6 +580,7 @@ App::~App() {
     if (cc_thread_.joinable()) cc_thread_.join();
     if (cc_dl_thread_.joinable()) cc_dl_thread_.join();
     if (rel_thread_.joinable()) rel_thread_.join();
+    if (pre_thread_.joinable()) pre_thread_.join();
     if (sugg_thread_.joinable()) sugg_thread_.join();
 }
 
@@ -5270,9 +5272,55 @@ void App::poll_related_autoplay() {
     // A clip started while that fetch ran: fetch its own now
     if (rec_for_ != now_playing_item_.video_id && !shorts_mode_ && (mode_ == Mode::Playing || rec_wait_))
         prefetch_rec(now_playing_item_.video_id);
+    if (rec_for_ == now_playing_item_.video_id)
+        if (const yt::SearchResult* p = pick_rec()) preresolve(p->video_id);   // its stream too, for R1 / the end
     if (!rec_wait_) return;
     if (mode_ != Mode::Loading) { rec_wait_ = false; return; }   // B left the wait
     if (rec_for_ == now_playing_item_.video_id) play_rec(rec_wait_ended_);
+}
+
+static long probe_stream_status(const std::string& url, const std::string& ua);
+
+// Resolve video_id off-thread (DESIGN 7.7: the clip YouTube plays next), stream checked as start_resolve checks it.
+void App::preresolve(const std::string& video_id) {
+    {
+        std::lock_guard<std::mutex> lk(pre_m_);
+        if (pre_running_ || pre_id_ == video_id) return;
+    }
+    if (pre_thread_.joinable()) pre_thread_.join();   // finished -> instant
+    pre_running_ = true;
+    yt::VideoPrefs prefs = play_prefs_;
+    std::string cfg = config_path_;
+    pre_thread_ = std::thread([this, video_id, prefs, cfg]() {
+        yt::VideoInfo info;
+        bool ok = false;
+        try {
+            yt::Innertube it(cfg);
+            info = it.resolve(video_id);
+            if (info.ok() && !info.is_live)
+                if (const yt::Format* vf = info.best_video(prefs))
+                    if (probe_stream_status(vf->url, info.user_agent) == 403) {
+                        it.refresh_visitor_data();
+                        info = it.resolve(video_id);
+                    }
+            ok = info.ok() && !info.is_live;
+        } catch (...) {}
+        {
+            std::lock_guard<std::mutex> lk(pre_m_);
+            pre_id_ = video_id; pre_info_ = std::move(info); pre_ok_ = ok;
+            pre_made_ = std::chrono::steady_clock::now();
+        }
+        pre_running_ = false;
+    });
+}
+
+// The stream preresolve found for video_id, if it is that clip and fresh (stream URLs last hours; keep to one).
+bool App::take_preresolved(const std::string& video_id, yt::VideoInfo& info) {
+    std::lock_guard<std::mutex> lk(pre_m_);
+    if (pre_id_ != video_id || !pre_ok_ || std::chrono::steady_clock::now() - pre_made_ > std::chrono::hours(1))
+        return false;
+    info = pre_info_;
+    return true;
 }
 
 // Save (or clear) the current playback position for ask-to-resume. Called when
@@ -5436,12 +5484,15 @@ void App::start_resolve(const std::string& video_id, const std::string& title, d
         try {
         if (dbg) std::fprintf(stderr, "[play] resolving %s (cap=%d)...\n",
                               video_id.c_str(), prefs.max_height);
-        yt::VideoInfo info = it_.resolve(video_id);   // background thread owns it_ here
+        yt::VideoInfo info;
+        bool pre = take_preresolved(video_id, info);   // DESIGN 7.7: found while the clip before played
+        if (dbg && pre) std::fprintf(stderr, "[play] %s resolved ahead\n", video_id.c_str());
+        if (!pre) info = it_.resolve(video_id);   // background thread owns it_ here
         // A 403 on byte 0 of the chosen stream means the URL itself was rejected
         // (paced delivery only refuses ranges BEYOND the first window) — typically a
         // stale visitorData session. Left alone, mpv would sit "buffering" for 90s.
         // Refresh the token and resolve once more.
-        if (info.ok() && !info.is_live) {
+        if (!pre && info.ok() && !info.is_live) {
             if (const yt::Format* vf = info.best_video(prefs)) {
                 long code = probe_stream_status(vf->url, info.user_agent);
                 if (dbg) std::fprintf(stderr, "[play] stream probe -> HTTP %ld\n", code);
