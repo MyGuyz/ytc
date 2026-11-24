@@ -1,4 +1,7 @@
 #include "ui.h"
+#include <csignal>
+#include <fcntl.h>
+#include <map>
 #include "platform.h"   // Windows timegm shim
 #include "i18n.h"
 #include "remux.h"
@@ -3882,6 +3885,7 @@ void App::pump_async() {
     }
     thumbs_.pump();
     poll_resolve();
+    poll_bg_handoff();
     poll_channel_info();
     poll_more();
     poll_more_home();
@@ -4240,9 +4244,12 @@ std::vector<int> App::shorts_list() const {
 }
 
 void App::render(gfx::Renderer& rn) {
+    // The background sound's clip reopening (7.5c): the player runs hidden under the loading page until the swap,
+    // so its wait for the sound's second never shows as a frozen picture
+    bool handoff_hidden = mode_ == Mode::Playing && bg_handoff_;
     if (mode_ == Mode::Playing)      render_player(rn);
-    else if (mode_ == Mode::Search)  render_search(rn);
-    else {
+    if (mode_ == Mode::Search)       render_search(rn);
+    else if (mode_ != Mode::Playing || handoff_hidden) {
         switch (view_mode_) {
             case ViewMode::Carousel:   render_carousel(rn); break;
             case ViewMode::Carousel3D: render_carousel3d(rn); break;
@@ -4251,7 +4258,7 @@ void App::render(gfx::Renderer& rn) {
             default:                   render_grid(rn); break;
         }
         if (mode_ == Mode::Loading && shorts_mode_) render_shorts_loading(rn);
-        else if (mode_ == Mode::Loading) render_loading(rn);
+        else if (mode_ == Mode::Loading || handoff_hidden) render_loading(rn);
     }
     if (menu_open_) render_menu(rn);   // overlay on top of whatever view
     if (desc_open_) {   // description floats above everything (a post: its own page)
@@ -5280,6 +5287,10 @@ void App::poll_related_autoplay() {
 }
 
 static long probe_stream_status(const std::string& url, const std::string& ua);
+static std::map<std::string, std::string> stop_bg_sound();
+static std::map<std::string, std::string> read_bg_file(const char* path);
+static bool bg_sound_alive();
+static const double BG_HANDOFF_LEAD_S = 4.0;   // the player's start, ahead of the sound: about its buffering time
 
 // Resolve video_id off-thread (DESIGN 7.7: the clip YouTube plays next), stream checked as start_resolve checks it.
 void App::preresolve(const std::string& video_id) {
@@ -5570,10 +5581,26 @@ void App::poll_resolve() {
         return;
     }
     double start_at = resume_pos_; resume_pos_ = 0;   // consume the resume point
+    // The background sound's own clip, reopened (DESIGN.md 7.5c): the player starts silent a little ahead of where
+    // the sound is, and poll_bg_handoff swaps them once the player really plays (its stream takes a few seconds to
+    // come in), so the music never stops on the way in. Any other clip stops the background sound now.
+    bg_handoff_ = false;
+    auto st = read_bg_file("/tmp/ytbg/state");
+    if (!bg_resume_id_.empty() && bg_resume_id_ == now_playing_item_.video_id && st["id"] == bg_resume_id_ &&
+        bg_sound_alive()) {
+        start_at = std::atof(st["pos_ms"].c_str()) / 1000.0 + BG_HANDOFF_LEAD_S;
+        bg_handoff_ = true;
+        bg_handoff_from_ = start_at;
+        bg_handoff_until_ = SDL_GetTicks() + 20000;
+    } else {
+        stop_bg_sound();
+    }
+    bg_resume_id_.clear();
     if (!player_.play(r.video_url, r.audio_url, r.user_agent, start_at, r.paced)) {
+        if (bg_handoff_) bg_handoff_ = false;   // the background sound simply plays on
         mode_ = Mode::Grid; status_msg_ = i18n::tr(i18n::Str::PlayerFailed); return;
     }
-    player_.set_volume(volume_);                 // apply the app-local volume level
+    player_.set_volume(bg_handoff_ ? 0 : volume_);   // the app-local volume level (silent until the handoff)
     playing_audio_url_ = r.audio_url; playing_video_url_ = r.video_url; playing_ua_ = r.user_agent;
     playing_author_ = r.author;
     player_.set_speed(playback_speed_);          // apply speed (persists across re-resolve)
@@ -5636,27 +5663,105 @@ bool App::exit_to_background(bool forced) {
     return true;
 }
 
-void App::resume_background(const std::string& video_id) {
-    std::ifstream in("/tmp/ytbg/last");
+// The background sound (DESIGN.md 7.5c), read from its files: key=value lines.
+static std::map<std::string, std::string> read_bg_file(const char* path) {
+    std::map<std::string, std::string> kv;
+    std::ifstream in(path);
     std::string line;
-    yt::SearchResult v;
-    double pos = 0;
-    bool ended = false;
     while (std::getline(in, line)) {
         auto eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        std::string k = line.substr(0, eq), val = line.substr(eq + 1);
-        if (k == "id") v.video_id = val;
-        else if (k == "title") v.title = val;
-        else if (k == "channel") v.author = val;
-        else if (k == "channel_id") v.channel_id = val;
-        else if (k == "thumb_url") v.thumbnail_url = val;
-        else if (k == "pos_ms") pos = std::atof(val.c_str()) / 1000.0;
-        else if (k == "ended") ended = val == "1";
+        if (eq != std::string::npos) kv[line.substr(0, eq)] = line.substr(eq + 1);
     }
-    if (v.video_id != video_id || ended) return;
+    return kv;
+}
+
+static bool bg_sound_alive() {
+#ifndef __linux__
+    return false;   // the background sound is the Brick's (Linux) only
+#endif
+    std::ifstream in("/tmp/ytbg/pid");
+    int p = 0;
+    return (in >> p) && p > 0 && kill(p, 0) == 0;
+}
+
+// Stop the background sound and return where it got to (its "last" file); empty when none was playing.
+static std::map<std::string, std::string> stop_bg_sound() {
+    if (!bg_sound_alive()) return {};
+    int fd = open("/tmp/ytbg/cmd", O_WRONLY | O_NONBLOCK);
+    if (fd >= 0) { (void)!write(fd, "stop\n", 5); close(fd); }
+    for (int i = 0; i < 30 && access("/tmp/ytbg/pid", F_OK) == 0; i++) usleep(100000);
+    if (bg_sound_alive()) {   // 3 s and still there
+        std::ifstream in("/tmp/ytbg/pid");
+        int p = 0;
+        if ((in >> p) && p > 0) kill(p, SIGKILL);
+        unlink("/tmp/ytbg/pid");
+        unlink("/tmp/ytbg/state");
+    }
+    return read_bg_file("/tmp/ytbg/last");
+}
+
+// Where the background sound is now: its state file's second (rewritten about twice a second) plus the time since
+// it was written. < 0 = unknown.
+static double bg_sound_pos_now() {
+    auto st = read_bg_file("/tmp/ytbg/state");
+    struct stat sb;
+    if (st["state"] != "playing" || stat("/tmp/ytbg/state", &sb) != 0) return -1;
+    struct timespec now;
+    clock_gettime(CLOCK_REALTIME, &now);
+    double age = (now.tv_sec - sb.st_mtim.tv_sec) + (now.tv_nsec - sb.st_mtim.tv_nsec) / 1e9;
+    return std::atof(st["pos_ms"].c_str()) / 1000.0 + (age > 0 && age < 2 ? age : 0);
+}
+
+// The swap (see poll_resolve), at the same second (2026-11-24: the first try swapped at once and the song jumped):
+// once the silent player plays, it waits (paused) for the background sound to reach it, or jumps ahead when the
+// sound is already past it; then the background sound stops and the player's own sound comes up. B leaves the sound
+// playing; after 20 s it swaps whatever the seconds.
+void App::poll_bg_handoff() {
+    if (!bg_handoff_) return;
+    if (mode_ != Mode::Playing) {   // left the player: the background sound simply plays on
+        bg_handoff_ = bg_hold_ = false;
+        return;
+    }
+    bool late = SDL_GetTicks() >= bg_handoff_until_;
+    if (!late) {
+        if (!player_.active()) return;
+        double ppos = player_.position();
+        if (!bg_hold_ && (player_.paused() || ppos <= bg_handoff_from_ + 0.2)) return;   // still buffering
+        double bpos = bg_sound_pos_now();
+        if (bpos >= 0) {
+            if (ppos - bpos > 0.08) {   // ahead: hold here until the sound gets to it
+                if (!player_.paused()) player_.set_pause(true);
+                bg_hold_ = true;
+                return;
+            }
+            if (bpos - ppos > 1.5) {    // behind (it buffered longer than the lead): jump ahead and wait again
+                player_.set_pause(false);
+                bg_hold_ = false;
+                bg_handoff_from_ = bpos + BG_HANDOFF_LEAD_S / 2;
+                player_.seek_relative(bg_handoff_from_ - ppos);
+                return;
+            }
+        }
+    }
+    bg_handoff_ = bg_hold_ = false;
+    int fd = open("/tmp/ytbg/cmd", O_WRONLY | O_NONBLOCK);   // no wait: it exits on its own in a moment
+    if (fd >= 0) { (void)!write(fd, "stop\n", 5); close(fd); }
+    player_.set_pause(false);
+    player_.set_volume(volume_);
+}
+
+// YouTube opened while its sound plays in the background (launch.sh sets YTC_RESUME_ID): open that clip. The sound
+// plays on while the app starts and finds the stream; poll_resolve stops it as the player starts, at its second
+// (2026-11-24, the user's ask: no silence on the way in; it was stopped before the app even started).
+void App::resume_background(const std::string& video_id) {
+    auto st = read_bg_file("/tmp/ytbg/state");
+    if (st["id"] != video_id || !bg_sound_alive()) return;
+    yt::SearchResult v;
+    v.video_id = video_id;
+    v.title = st["title"];
+    v.author = st["channel"];
+    bg_resume_id_ = video_id;
     play_item(v, -1);
-    resume_pos_ = pos;   // play_item started the resolve at 0; poll_resolve applies this
 }
 
 void App::ensure_visible() {

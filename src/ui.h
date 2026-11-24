@@ -723,6 +723,12 @@ private:
     Player player_;
     unsigned controls_until_ = 0;   // deadline (SDL ticks) to keep the info overlay shown
     double resume_pos_ = 0;         // seek here once the next stream loads (quality re-resolve)
+    bool bg_handoff_ = false;       // the player starts silent; poll_bg_handoff swaps the sounds (7.5c)
+    bool bg_hold_ = false;          // the player paused, waiting for the sound to reach its second
+    double bg_handoff_from_ = 0;
+    uint32_t bg_handoff_until_ = 0;
+    void poll_bg_handoff();
+    std::string bg_resume_id_;      // the background sound's clip, reopened: start at its second (7.5c)
     bool quality_dirty_ = false;    // quality changed in the player menu; re-resolve on close
     // Per-video overrides from the player options menu (NOT persisted; the global
     // Settings values are untouched and return on the next video). -1 = none.
