@@ -81,6 +81,11 @@ private:
     std::unique_ptr<Texture> atlas_;
     std::shared_ptr<const std::vector<uint8_t>> ttf_, fb_ttf_, thai_ttf_;  // file bytes (fontinfos point here)
     void* info_ = nullptr;                    // stbtt_fontinfo* (opaque; gfx.cpp only)
+    // Brick OS: more fonts (YTC_FONTS, colon-separated paths), tried in order after the fallback, loaded when needed
+    struct Extra { std::shared_ptr<const std::vector<uint8_t>> ttf; void* info; float scale; };
+    mutable std::vector<Extra> extra_;
+    mutable bool extra_loaded_ = false;
+    void load_extra() const;
     void* fb_info_ = nullptr;                 // fallback stbtt_fontinfo* or nullptr
     void* thai_info_ = nullptr;               // Thai stbtt_fontinfo* or nullptr
     float thai_scale_ = 0;

@@ -189,11 +189,40 @@ Font::~Font() {
     delete static_cast<stbtt_fontinfo*>(info_);
     delete static_cast<stbtt_fontinfo*>(fb_info_);
     delete static_cast<stbtt_fontinfo*>(thai_info_);
+    for (Extra& e : extra_) delete static_cast<stbtt_fontinfo*>(e.info);
+}
+
+void Font::load_extra() const {
+    if (extra_loaded_) return;
+    extra_loaded_ = true;
+    const char* env = std::getenv("YTC_FONTS");
+    if (!env) return;
+    auto* info = static_cast<const stbtt_fontinfo*>(info_);
+    float em_px = scale_ / stbtt_ScaleForMappingEmToPixels(info, 1.0f);
+    std::string list = env;
+    for (size_t a = 0; a <= list.size();) {
+        size_t b = list.find(':', a);
+        if (b == std::string::npos) b = list.size();
+        if (auto ttf = b > a ? read_font_file(list.substr(a, b - a)) : nullptr) {
+            auto* ei = new stbtt_fontinfo();
+            if (stbtt_InitFont(ei, ttf->data(), stbtt_GetFontOffsetForIndex(ttf->data(), 0)))
+                extra_.push_back({std::move(ttf), ei, stbtt_ScaleForMappingEmToPixels(ei, em_px)});
+            else
+                delete ei;
+        }
+        a = b + 1;
+    }
 }
 
 const Font::Glyph* Font::glyph(uint32_t cp) const {
     auto it = glyphs_.find(cp);
     if (it != glyphs_.end()) return it->second.w < 0 ? nullptr : &it->second;
+    if ((cp >= 0xFE00 && cp <= 0xFE0F) || cp == 0x200D || cp == 0x20E3 || (cp >= 0x1F3FB && cp <= 0x1F3FF) ||
+        (cp >= 0x200B && cp <= 0x200F) || (cp >= 0x202A && cp <= 0x202E) || (cp >= 0x2060 && cp <= 0x206F)) {
+        Glyph miss{}; miss.w = -1;   // joiners, variation selectors, skin tones, direction marks: never drawn
+        glyphs_[cp] = miss;
+        return nullptr;
+    }
     auto* info = static_cast<const stbtt_fontinfo*>(info_);
     float scale = scale_;
     int gi = 0;
@@ -208,6 +237,13 @@ const Font::Glyph* Font::glyph(uint32_t cp) const {
     if (gi == 0 && fb_info_) {
         auto* fb = static_cast<const stbtt_fontinfo*>(fb_info_);
         if (int fg = stbtt_FindGlyphIndex(fb, (int)cp)) { info = fb; gi = fg; scale = fb_scale_; }
+    }
+    if (gi == 0) {   // Brick OS: the system's fonts for every other language, symbols and emoji
+        load_extra();
+        for (const Extra& e : extra_) {
+            auto* ei = static_cast<const stbtt_fontinfo*>(e.info);
+            if (int eg = stbtt_FindGlyphIndex(ei, (int)cp)) { info = ei; gi = eg; scale = e.scale; break; }
+        }
     }
     if (gi == 0) {
         // Not in either font. Emoji-ish -> skip; otherwise show a tofu box (U+25A1).
