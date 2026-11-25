@@ -292,7 +292,7 @@ int bgaudio_main(const char* request_file) {
     std::string pending;
     bool ended = false;
     while (!g_quit && !ended) {
-        mpv_event* e = mpv_wait_event(mpv, 0.5);
+        mpv_event* e = mpv_wait_event(mpv, 0.1);   // short: "stop" must not leave it sounding over the player (7.5c)
         bool clip_done = false;
         for (; e->event_id != MPV_EVENT_NONE; e = mpv_wait_event(mpv, 0)) {
             if (e->event_id == MPV_EVENT_SHUTDOWN) ended = true;

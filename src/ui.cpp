@@ -5290,7 +5290,7 @@ static long probe_stream_status(const std::string& url, const std::string& ua);
 static std::map<std::string, std::string> stop_bg_sound();
 static std::map<std::string, std::string> read_bg_file(const char* path);
 static bool bg_sound_alive();
-static const double BG_HANDOFF_LEAD_S = 4.0;   // the player's start, ahead of the sound: about its buffering time
+static const double BG_HANDOFF_LEAD_S = 6.0;   // the player's start, ahead of the sound: over its buffering time (2.5-4.5 s at 720p)
 
 // Resolve video_id off-thread (DESIGN 7.7: the clip YouTube plays next), stream checked as start_resolve checks it.
 void App::preresolve(const std::string& video_id) {
@@ -5734,7 +5734,7 @@ void App::poll_bg_handoff() {
                 bg_hold_ = true;
                 return;
             }
-            if (bpos - ppos > 1.5) {    // behind (it buffered longer than the lead): jump ahead and wait again
+            if (bpos - ppos > 0.15) {   // behind (it buffered longer than the lead): jump ahead and wait again
                 player_.set_pause(false);
                 bg_hold_ = false;
                 bg_handoff_from_ = bpos + BG_HANDOFF_LEAD_S / 2;
