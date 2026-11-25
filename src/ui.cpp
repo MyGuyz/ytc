@@ -1869,6 +1869,17 @@ void App::maybe_start_cc_download() {
 }
 // Install a finished VTT — but only if that selection is still active — then
 // kick off whatever request queued up while the worker was busy.
+static std::string strip_cue_tags(const std::string& s) {   // <00:00:01.000> <c> </c>: they split a Thai mark from its consonant
+    std::string t;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '<' && i + 1 < s.size() && (s[i + 1] == 'c' || s[i + 1] == '/' || (s[i + 1] >= '0' && s[i + 1] <= '9'))) {
+            size_t e = s.find('>', i);
+            if (e != std::string::npos && e - i < 64) { i = e; continue; }
+        }
+        t += s[i];
+    }
+    return t;
+}
 void App::poll_caption_download() {
     if (!cc_dl_done_.exchange(false)) return;
     std::string vtt, lang; int res_sig;
@@ -1900,7 +1911,7 @@ void App::poll_caption_download() {
         }
     } else {
         std::string path = "/tmp/ytc_cc_" + lang + ".vtt";
-        { std::ofstream o(path, std::ios::binary); o << gfx::plain_text(vtt); }
+        { std::ofstream o(path, std::ios::binary); o << gfx::plain_text(strip_cue_tags(vtt)); }
         cc_paths_[lang] = path;
         // A queued request for what just landed (selecting a track whose prefetch
         // was in flight) is satisfied — drop it instead of fetching it again.
