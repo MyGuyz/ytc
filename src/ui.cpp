@@ -532,10 +532,10 @@ App::App(const std::string& config_path, gfx::Window* win)
     sponsorblock_ = it_.setting_int("sponsorblock", 0) != 0;   // default OFF
     autoplay_ = it_.setting_int("autoplay", 0) != 0;          // default OFF
     bg_on_exit_ = it_.setting_int("bg_on_exit", 1) != 0;      // default ON
-    // Home sources bitmask (1 fav / 2 history / 4 custom). Default: Favorites
-    // only — History and Custom are opt-in via Browsing > Home Feed.
-    home_sources_ = it_.setting_int("home_sources", 1) & 7;
-    if (!home_sources_) home_sources_ = 1;
+    // Home sources bitmask (1 fav / 2 history / 4 custom / 8 YouTube's recommendations). Default: the
+    // recommendations and Favorites — History and Custom are opt-in via Browsing > Home Feed.
+    home_sources_ = it_.setting_int("home_sources", 9) & 15;
+    if (!home_sources_) home_sources_ = 9;
 
     // UI language + Innertube locale (0 = English). Drives translated labels and
     // YouTube-localized titles/metadata. Set before any feed fetch is kicked off.
@@ -1046,15 +1046,14 @@ void App::refresh_current_view(bool is_retry) {
                 // Blend the enabled sources (bitmask: 1 fav / 2 history / 4 custom):
                 // channel uploads via home_all (age-sorted), then the custom feed's
                 // saved-search results interleaved in round-robin, deduped by id.
-                bool fav = hsrc & 1, hist = (hsrc & 2) != 0, cust = (hsrc & 4) != 0;
+                bool fav = hsrc & 1, hist = (hsrc & 2) != 0, cust = (hsrc & 4) != 0, rec = (hsrc & 8) != 0;
                 if (fav) f.items = it_.home_all({}, hist, &hc);
                 else if (hist) {
                     std::vector<std::string> ids;
                     for (auto& [cid, nm] : it_.history_channels()) ids.push_back(cid);
                     if (!ids.empty()) f.items = it_.home_all(ids, false, &hc);
                 }
-                if (cust) {
-                    std::vector<yt::SearchResult> cf = it_.custom_feed();
+                auto weave = [&f](std::vector<yt::SearchResult> cf) {   // one of each in turn, no clip twice
                     std::vector<yt::SearchResult> merged;
                     std::unordered_map<std::string, bool> seen;
                     auto key_of = [](const yt::SearchResult& r) {
@@ -1070,6 +1069,12 @@ void App::refresh_current_view(bool is_retry) {
                             merged.push_back(std::move(cf[i]));
                     }
                     f.items = std::move(merged);
+                };
+                if (cust) weave(it_.custom_feed());
+                if (rec) {
+                    std::vector<yt::SearchResult> own = std::move(f.items);
+                    f.items = it_.home_recommended(&hc);   // leads, as on YouTube
+                    weave(std::move(own));
                 }
                 // Favorite playlists ride with the Favorites source: woven into the
                 // All feed near the top at a wide spacing (they carry no upload date,
@@ -1090,8 +1095,9 @@ void App::refresh_current_view(bool is_retry) {
                 // was unreachable (drives the auto-retry banner).
                 bool expect = (fav && !it_.favorite_channel_ids().empty()) ||
                               (hist && !it_.history_channels().empty()) ||
-                              (cust && !it_.custom_feed_sources().empty());
-                f.ok = !expect || it_.has_visitor_data(); }
+                              (cust && !it_.custom_feed_sources().empty()) ||
+                              (rec && !it_.history().empty());
+                f.ok = !expect || !f.items.empty() || it_.has_visitor_data(); }
             else if (kind == RK_HOME_PLAYLISTS){ f.items = it_.home_playlists({}, &hc);
                 // Favorited playlists lead the Playlists tab (deduped against the
                 // favorites-channels' own playlists fetched above).
@@ -1323,6 +1329,8 @@ void App::open_settings_homefeed() {
     auto onoff = [&](int bit){ return std::string(tr(home_sources_ & bit ? S::On : S::Off)); };
     menu_kind_ = MenuKind::SettingsHomeFeed;
     menu_items_.clear();
+    menu_items_.push_back({tr(S::HomeRec) + std::string(":  ") + onoff(8),
+                           MenuAction::ToggleFeedRec});
     menu_items_.push_back({tr(S::Favorites) + std::string(":  ") + onoff(1),
                            MenuAction::ToggleFeedFavorites});
     menu_items_.push_back({tr(S::History) + std::string(":  ") + onoff(2),
@@ -1480,9 +1488,10 @@ void App::adjust_setting(MenuAction a, int dir) {
         return;
     }
     if (a == MenuAction::ToggleFeedFavorites || a == MenuAction::ToggleFeedHistory ||
-        a == MenuAction::ToggleFeedCustom) {
+        a == MenuAction::ToggleFeedCustom || a == MenuAction::ToggleFeedRec) {
         int bit = a == MenuAction::ToggleFeedFavorites ? 1
-                : a == MenuAction::ToggleFeedHistory   ? 2 : 4;
+                : a == MenuAction::ToggleFeedHistory   ? 2
+                : a == MenuAction::ToggleFeedRec       ? 8 : 4;
         int next = home_sources_ ^ bit;
         if (!next) return;                       // never all-off: keep the last source
         home_sources_ = next;
@@ -2795,7 +2804,7 @@ void App::menu_activate() {
                 // Feed emptied: fall back off Custom, and land back on Browsing.
                 if (home_sources_ & 4) {
                     home_sources_ &= ~4;
-                    if (!home_sources_) home_sources_ = 1;
+                    if (!home_sources_) home_sources_ = 9;
                     it_.set_setting_int("home_sources", home_sources_);
                 }
                 open_settings_browsing();
@@ -2841,6 +2850,7 @@ void App::menu_activate() {
         case MenuAction::ToggleFeedFavorites:
         case MenuAction::ToggleFeedHistory:
         case MenuAction::ToggleFeedCustom:
+        case MenuAction::ToggleFeedRec:
             return;   // value rows change with Left/Right only; A does nothing
         case MenuAction::Quit:
             menu_open_ = false;
@@ -4284,7 +4294,7 @@ bool App::is_value_action(MenuAction a) {
         case A::CycleAudioTrack: case A::CycleCaptionSize: case A::CycleCaptionStyle:
         case A::CycleSpeed: case A::ToggleSponsorBlock: case A::CycleCaptions:
         case A::ToggleAutoplay: case A::ToggleBgOnExit: case A::ToggleFeedFavorites: case A::ToggleFeedHistory:
-        case A::ToggleFeedCustom: case A::CycleLanguage: case A::CycleFilterType:
+        case A::ToggleFeedCustom: case A::ToggleFeedRec: case A::CycleLanguage: case A::CycleFilterType:
         case A::CycleFilterDuration: case A::CycleFilterDate: case A::CycleFilterSort:
             return true;
         default: return false;

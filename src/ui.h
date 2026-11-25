@@ -298,7 +298,7 @@ private:
                             GoSettingsPlayback, GoSettingsBrowsing,
                             AddSearchToFeed, GoCustomFeed, FeedSourceRow,
                             FeedRemoveYes, FeedRemoveNo, GoHomeFeedMenu,
-                            ToggleFeedFavorites, ToggleFeedHistory, ToggleFeedCustom,
+                            ToggleFeedFavorites, ToggleFeedHistory, ToggleFeedCustom, ToggleFeedRec,
                             GoPlayback,
                             ToggleSponsorBlock, CycleCaptions, ToggleAutoplay, ListenBackground, ToggleBgOnExit,
                             CycleLanguage, ClearHistory, CastToDevice,
@@ -480,7 +480,7 @@ private:
     bool bg_on_exit_ = true;               // setting "bg_on_exit": quitting during a clip keeps its sound
     std::string playing_audio_url_, playing_video_url_, playing_ua_, playing_author_;   // for the hand-over
     bool bg_handed_ = false;               // the sound went to "ytc --bg"
-    int  home_sources_ = 1;                // "home_sources" bitmask: 1 Favorites,
+    int  home_sources_ = 9;                // "home_sources" bitmask: 1 Favorites,
                                            // 2 History, 4 Custom (saved searches);
                                            // enabled sources interleave into Home
     int  lang_ = 0;                        // "lang": UI/content language index (i18n)

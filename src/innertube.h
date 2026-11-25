@@ -277,7 +277,10 @@ public:
         std::unordered_map<std::string, std::string> pl_cont;      // channel -> Playlists next-page token
         std::unordered_map<std::string, std::string> posts_cont;   // channel -> Posts next-page token
         std::unordered_map<std::string, std::string> cname;        // channel -> display name
+        std::vector<std::string> rec_seeds;                        // watched clips whose recommendations come next
+        std::vector<std::string> rec_seen;                         // clips home_recommended already gave
         bool has_more() const {
+            if (!rec_seeds.empty()) return true;
             for (auto& kv : vids_cont)   if (!kv.second.empty()) return true;
             for (auto& kv : shorts_cont) if (!kv.second.empty()) return true;
             for (auto& kv : pl_cont)     if (!kv.second.empty()) return true;
@@ -297,6 +300,9 @@ public:
     std::vector<SearchResult> home_all(std::vector<std::string> channel_ids = {},
                                        bool include_history = false,
                                        HomeCursor* cursor = nullptr);
+    // YouTube's recommendations for what was watched last (its "Up next" columns, mixed), without the clips already
+    // watched. A first page is kept 20 min in /tmp, so reopening the app asks YouTube nothing. Never throws.
+    std::vector<SearchResult> home_recommended(HomeCursor* cursor);
     // Next page of the home feed: continues each channel's Videos tab one page,
     // merges + date-sorts the new batch, and advances the cursor. Never throws.
     std::vector<SearchResult> home_feed_more(HomeCursor& cursor, int per_channel = 30);

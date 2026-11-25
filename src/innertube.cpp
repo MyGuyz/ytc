@@ -1085,9 +1085,102 @@ std::vector<SearchResult> Innertube::home_all(std::vector<std::string> channel_i
     return out;
 }
 
+// The recommendations of the cursor's next clips (four requests at most), one from each in turn.
+static std::vector<SearchResult> next_recommended(Innertube& it, Innertube::HomeCursor& cursor) {
+    const size_t kSeeds = 4;
+    size_t n = std::min(kSeeds, cursor.rec_seeds.size());
+    std::vector<std::vector<SearchResult>> lists(n);
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < n; ++i)
+        threads.emplace_back([&, i] {
+            try { lists[i] = it.related_videos(cursor.rec_seeds[i]); } catch (...) {}
+        });
+    for (auto& t : threads) t.join();
+    cursor.rec_seeds.erase(cursor.rec_seeds.begin(), cursor.rec_seeds.begin() + n);
+    std::unordered_map<std::string, bool> skip;
+    for (auto& id : cursor.rec_seen) skip[id] = true;
+    for (auto& w : it.history()) skip[std::get<0>(w)] = true;
+    std::vector<SearchResult> out;
+    size_t longest = 0;
+    for (auto& l : lists) longest = std::max(longest, l.size());
+    for (size_t k = 0; k < longest; ++k)
+        for (auto& l : lists)
+            if (k < l.size() && skip.emplace(l[k].video_id, true).second) {
+                cursor.rec_seen.push_back(l[k].video_id);
+                out.push_back(std::move(l[k]));
+            }
+    return out;
+}
+
+std::vector<SearchResult> Innertube::home_recommended(HomeCursor* cursor) {
+    const char* kCache = "/tmp/ytc_home_rec.json";
+    std::vector<SearchResult> out;
+    HomeCursor hc;
+    try {
+        auto watched = history();
+        if (watched.empty()) return out;
+        std::string hl = locale().first;
+        {   // the page kept from a few minutes ago
+            std::ifstream f(kCache);
+            json c = f ? json::parse(f, nullptr, false) : json();
+            long age = c.is_object() ? (long)time(nullptr) - c.value("t", 0L) : -1;
+            if (age >= 0 && age < 20 * 60 && c.value("hl", "") == hl) {
+                std::unordered_map<std::string, bool> seen;
+                for (auto& w : watched) seen[std::get<0>(w)] = true;
+                for (auto& v : c["items"]) {
+                    SearchResult r;
+                    r.video_id = v.value("id", ""); r.channel_id = v.value("cid", "");
+                    r.title = v.value("title", ""); r.author = v.value("author", "");
+                    r.length_text = v.value("len", ""); r.view_count_text = v.value("views", "");
+                    r.published_text = v.value("pub", ""); r.thumbnail_url = v.value("thumb", "");
+                    r.length_seconds = v.value("secs", 0L);
+                    r.is_short = v.value("short", false); r.is_live = v.value("live", false);
+                    hc.rec_seen.push_back(r.video_id);
+                    if (!seen.count(r.video_id)) out.push_back(std::move(r));
+                }
+                for (auto& s : c["seeds"]) hc.rec_seeds.push_back(s.get<std::string>());
+                if (!out.empty()) {
+                    if (cursor) { cursor->rec_seeds = hc.rec_seeds; cursor->rec_seen = hc.rec_seen; }
+                    return out;
+                }
+            }
+        }
+        hc = {};
+        out.clear();
+        // The last clips watched, one per channel first so the page is not all one singer's
+        std::unordered_map<std::string, bool> chan;
+        std::vector<std::string> later;
+        for (auto& w : watched) {
+            if (hc.rec_seeds.size() >= 12) break;
+            if (chan.emplace(std::get<2>(w), true).second) hc.rec_seeds.push_back(std::get<0>(w));
+            else later.push_back(std::get<0>(w));
+        }
+        for (auto& id : later) if (hc.rec_seeds.size() < 12) hc.rec_seeds.push_back(id);
+        ensure_visitor_data();   // warm once; the threads only read the token
+        out = next_recommended(*this, hc);
+        if (cursor) { cursor->rec_seeds = hc.rec_seeds; cursor->rec_seen = hc.rec_seen; }
+        if (!out.empty()) {
+            json items = json::array();
+            for (auto& r : out)
+                items.push_back({{"id", r.video_id}, {"cid", r.channel_id}, {"title", r.title}, {"author", r.author},
+                                 {"len", r.length_text}, {"views", r.view_count_text}, {"pub", r.published_text},
+                                 {"thumb", r.thumbnail_url}, {"secs", r.length_seconds}, {"short", r.is_short},
+                                 {"live", r.is_live}});
+            json c = {{"t", (long)time(nullptr)}, {"hl", hl}, {"items", items}, {"seeds", hc.rec_seeds}};
+            std::ofstream o(kCache);
+            o << c.dump();
+        }
+    } catch (const std::exception& ex) {
+        std::fprintf(stderr, "[innertube] home_recommended failed: %s\n", ex.what());
+    }
+    return out;
+}
+
 std::vector<SearchResult> Innertube::home_feed_more(HomeCursor& cursor, int per_channel) {
     std::vector<SearchResult> out;
     if (!cursor.has_more()) return out;
+    std::vector<SearchResult> rec;
+    try { if (!cursor.rec_seeds.empty()) rec = next_recommended(*this, cursor); } catch (...) {}
     try {
         ensure_visitor_data();   // warm once; workers only read the cached token
 
@@ -1140,7 +1233,9 @@ std::vector<SearchResult> Innertube::home_feed_more(HomeCursor& cursor, int per_
     } catch (const std::exception& ex) {
         std::fprintf(stderr, "[innertube] home_feed_more failed: %s\n", ex.what());
     }
-    return out;
+    // what YouTube recommends leads, the channels' older clips follow
+    rec.insert(rec.end(), std::make_move_iterator(out.begin()), std::make_move_iterator(out.end()));
+    return rec;
 }
 
 std::vector<SearchResult> Innertube::home_playlists(std::vector<std::string> channel_ids,
