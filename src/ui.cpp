@@ -1,6 +1,7 @@
 #include "ui.h"
 #include <csignal>
 #include <fcntl.h>
+#include <sys/wait.h>
 #include <map>
 #include "platform.h"   // Windows timegm shim
 #include "i18n.h"
@@ -562,6 +563,8 @@ App::App(const std::string& config_path, gfx::Window* win)
 
 App::~App() {
     if (media_flag_on_) unlink(getenv("YTC_MEDIA_FLAG"));
+    close_panel();
+    if (panel_thumb_thread_.joinable()) panel_thumb_thread_.join();
     cast_events_run_ = false;
     if (cast_events_thread_.joinable()) cast_events_thread_.join();
     if (resolve_thread_.joinable()) resolve_thread_.join();
@@ -3896,6 +3899,7 @@ void App::pump_async() {
     thumbs_.pump();
     poll_resolve();
     poll_bg_handoff();
+    poll_panel();
     poll_channel_info();
     poll_more();
     poll_more_home();
@@ -5758,6 +5762,117 @@ void App::poll_bg_handoff() {
     if (fd >= 0) { (void)!write(fd, "stop\n", 5); close(fd); }
     player_.set_pause(false);
     player_.set_volume(volume_);
+}
+
+// The music service shows the panel what plays (it exits after a few idle minutes): start it, detached from the app.
+static void start_music_service() {
+#ifdef __linux__
+    if (std::system("pidof musicplayerd.elf > /dev/null") == 0) return;
+    pid_t p = fork();
+    if (p == 0) {
+        setsid();
+        if (fork() != 0) _exit(0);
+        int null = open("/dev/null", O_RDWR);
+        dup2(null, 0); dup2(null, 1); dup2(null, 2);
+        for (int fd = 3; fd < 1024; fd++) close(fd);   // never the app's sound or display
+        execlp("musicplayerd.elf", "musicplayerd.elf", (char*)nullptr);
+        _exit(1);
+    }
+    if (p > 0) waitpid(p, nullptr, 0);
+#endif
+}
+
+void App::close_panel() {
+    if (panel_cmd_fd_ < 0) return;
+    close(panel_cmd_fd_);
+    panel_cmd_fd_ = -1;
+    unlink("/tmp/ytfg/pid");
+    unlink("/tmp/ytfg/state");
+    unlink("/tmp/ytfg/cmd");
+    panel_id_.clear();
+}
+
+// The HOME panel over a playing clip (DESIGN.md 7.5c, 2026-11-25): its picture, title and buttons.
+void App::poll_panel() {
+#ifdef __linux__
+    if (!getenv("YTC_MEDIA_FLAG")) return;   // Brick OS only
+    bool playing = mode_ == Mode::Playing && player_.active();
+    bool on = playing || (mode_ == Mode::Loading && panel_cmd_fd_ >= 0);   // the next clip on its way: no blink
+    if (!on || now_playing_item_.video_id.empty() || bg_handed_) {
+        close_panel();
+        return;
+    }
+    const char* kThumb = "/tmp/ytfg/thumb.jpg";
+    if (panel_cmd_fd_ < 0) {
+        mkdir("/tmp/ytfg", 0755);
+        unlink("/tmp/ytfg/cmd");
+        mkfifo("/tmp/ytfg/cmd", 0666);
+        panel_cmd_fd_ = open("/tmp/ytfg/cmd", O_RDWR | O_NONBLOCK | O_CLOEXEC);
+        if (panel_cmd_fd_ < 0) return;
+        if (FILE* f = std::fopen("/tmp/ytfg/pid", "w")) { std::fprintf(f, "%d\n", (int)getpid()); std::fclose(f); }
+        panel_next_ = 0;
+        start_music_service();
+    }
+    char buf[256];
+    ssize_t n = read(panel_cmd_fd_, buf, sizeof buf - 1);
+    if (n > 0 && playing && !bg_handoff_) {
+        buf[n] = 0;
+        std::string c(buf, strcspn(buf, "\n"));   // one press at a time
+        if (c == "toggle") player_.toggle_pause();
+        else if (c == "play") player_.set_pause(false);
+        else if (c == "pause" || c == "stop") player_.set_pause(true);
+        else if (c == "next") play_neighbour(+1);
+        else if (c == "prev") {   // past 5 s back to the start, else the clip before
+            if (player_.position() > 5) player_.seek_relative(-player_.position());
+            else play_neighbour(-1);
+        } else if (c.rfind("seek ", 0) == 0) player_.seek_relative(std::atof(c.c_str() + 5));
+        panel_next_ = 0;
+    }
+    if (panel_thumb_done_.exchange(false)) {
+        panel_thumb_thread_.join();
+        panel_thumb_running_ = false;
+        panel_thumb_ = panel_thumb_ok_ ? kThumb : "";
+        panel_next_ = 0;
+    }
+    if (panel_id_ != now_playing_item_.video_id && !panel_thumb_running_) {
+        panel_id_ = now_playing_item_.video_id;
+        panel_thumb_.clear();
+        std::string url = now_playing_item_.thumbnail_url.empty() ? thumb_for(panel_id_) : now_playing_item_.thumbnail_url;
+        if (url.rfind("http", 0) != 0) panel_thumb_ = url;   // a download's own picture
+        else {
+            panel_thumb_running_ = true;
+            panel_thumb_thread_ = std::thread([this, url, kThumb]() {
+                bool ok = false;
+                try {
+                    HttpClient http;
+                    auto r = http.get(url, {}, 8);
+                    if (r.ok() && !r.body.empty()) {
+                        std::string tmp = std::string(kThumb) + ".tmp";
+                        { std::ofstream o(tmp, std::ios::binary); o << r.body; ok = (bool)o; }
+                        ok = ok && rename(tmp.c_str(), kThumb) == 0;
+                    }
+                } catch (...) {}
+                panel_thumb_ok_ = ok;
+                panel_thumb_done_ = true;
+            });
+        }
+        panel_next_ = 0;
+    }
+    if (SDL_GetTicks() < panel_next_) return;
+    panel_next_ = SDL_GetTicks() + 500;
+    auto one_line = [](std::string s) { for (char& ch : s) if (ch == '\n' || ch == '\r') ch = ' '; return s; };
+    const std::string& title = playing && !now_playing_title_.empty() ? now_playing_title_ : now_playing_item_.title;
+    const std::string& who = playing && !playing_author_.empty() ? playing_author_ : now_playing_item_.author;
+    if (FILE* f = std::fopen("/tmp/ytfg/state.tmp", "w")) {
+        std::fprintf(f, "state=%s\npos_ms=%d\ndur_ms=%d\nid=%s\ntitle=%s\nchannel=%s\nthumb=%s\n",
+                     playing && player_.paused() ? "paused" : "playing",
+                     playing ? (int)(player_.position() * 1000) : 0, playing ? (int)(player_.duration() * 1000) : 0,
+                     now_playing_item_.video_id.c_str(), one_line(title).c_str(), one_line(who).c_str(),
+                     panel_thumb_.c_str());
+        std::fclose(f);
+        rename("/tmp/ytfg/state.tmp", "/tmp/ytfg/state");
+    }
+#endif
 }
 
 // YouTube opened while its sound plays in the background (launch.sh sets YTC_RESUME_ID): open that clip. The sound

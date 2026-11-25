@@ -728,6 +728,15 @@ private:
     double bg_handoff_from_ = 0;
     uint32_t bg_handoff_until_ = 0;
     void poll_bg_handoff();
+    // The HOME panel shows and controls the clip on screen (7.5c): /tmp/ytfg, the same files as the background sound's
+    void poll_panel();
+    void close_panel();
+    int panel_cmd_fd_ = -1;
+    uint32_t panel_next_ = 0;       // SDL ticks: the next state write
+    std::string panel_id_;          // the clip its picture was fetched for
+    std::string panel_thumb_;       // "" until it is in
+    std::thread panel_thumb_thread_;
+    std::atomic<bool> panel_thumb_done_{false}, panel_thumb_ok_{false}, panel_thumb_running_{false};
     std::string bg_resume_id_;      // the background sound's clip, reopened: start at its second (7.5c)
     bool quality_dirty_ = false;    // quality changed in the player menu; re-resolve on close
     // Per-video overrides from the player options menu (NOT persisted; the global
