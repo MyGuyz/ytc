@@ -128,6 +128,18 @@ static std::string thai_shape(const std::string& s) {
     if (TextThai_toGlyphs(s.c_str(), out.data(), (int)out.size()) <= 0) return s;
     return std::string(out.data());
 }
+std::string plain_text(const std::string& s) {
+    std::string t;
+    for (size_t i = 0; i < s.size();) {
+        auto at = [&](size_t k) { return i + k < s.size() ? (unsigned char)s[i + k] : 0u; };
+        if (at(0) == 0xEF && at(1) == 0xB8 && at(2) >= 0x80 && at(2) <= 0x8F) { i += 3; continue; }              // FE00-FE0F
+        if (at(0) == 0xE2 && at(1) == 0x83 && at(2) == 0xA3) { i += 3; continue; }                               // 20E3
+        if (at(0) == 0xE2 && at(1) == 0x81 && at(2) >= 0xA6 && at(2) <= 0xA9) { i += 3; continue; }              // 2066-2069
+        if (at(0) == 0xF0 && at(1) == 0x9F && at(2) == 0x8F && at(3) >= 0xBB && at(3) <= 0xBF) { i += 4; continue; }  // 1F3FB-F
+        t += s[i++];
+    }
+    return thai_shape(t);
+}
 static bool thai_cp(uint32_t cp) {
     return (cp >= 0x0E00 && cp <= 0x0E7F) || (cp >= 0xF700 && cp <= 0xF72F);
 }

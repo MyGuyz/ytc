@@ -529,6 +529,11 @@ App::App(const std::string& config_path, gfx::Window* win)
     {   // Captions render in mpv (libass), not our atlas: give it the CJK font too.
         std::string cjk = cjk_font_path();
         if (!cjk.empty()) player_.set_fonts_dir(cjk.substr(0, cjk.rfind('/') + 1));
+        // Brick OS: and the UI's chain for every other language (libass is patched: tools/brickos/libass_fallback.py)
+        std::string chain = platform::exe_dir() + "/data/fonts/Inter-Medium.ttf:" + platform::exe_dir() + "/data/fonts/BrickOSThai.ttf";
+        if (const char* env = std::getenv("YTC_FONTS")) chain += std::string(":") + env;
+        if (!cjk.empty()) chain += ":" + cjk;
+        setenv("YTC_SUB_FONTS", chain.c_str(), 1);
     }
     sponsorblock_ = it_.setting_int("sponsorblock", 0) != 0;   // default OFF
     autoplay_ = it_.setting_int("autoplay", 0) != 0;          // default OFF
@@ -1895,7 +1900,7 @@ void App::poll_caption_download() {
         }
     } else {
         std::string path = "/tmp/ytc_cc_" + lang + ".vtt";
-        { std::ofstream o(path, std::ios::binary); o << vtt; }
+        { std::ofstream o(path, std::ios::binary); o << gfx::plain_text(vtt); }
         cc_paths_[lang] = path;
         // A queued request for what just landed (selecting a track whose prefetch
         // was in flight) is satisfied — drop it instead of fetching it again.

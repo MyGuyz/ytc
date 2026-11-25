@@ -58,6 +58,10 @@ private:
 // supplies codepoints the primary lacks, drawn at the same em size on the same
 // baseline. Missing from both: emoji-ish codepoints are silently skipped (no more
 // "????"), anything else renders as a tofu box.
+// Brick OS: text ready for a renderer without shaping: Thai marks as BrickOS Thai's pre-placed glyphs, and no emoji
+// variation selectors, skin tones or direction isolates
+std::string plain_text(const std::string& s);
+
 class Font {
 public:
     // fallback_path: optional second font ("" or unreadable = none). Font file bytes

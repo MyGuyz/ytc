@@ -44,6 +44,7 @@ if ! done_ fribidi; then src fribidi fribidi.tar.xz
     && make -j$J >/dev/null && make install DESTDIR=$D >/dev/null; mark fribidi; fi
 
 if ! done_ libass; then src libass libass.tar.xz
+  python3 "${YTC_TOOLS:-/src/tools/brickos}/libass_fallback.py" "$W/libass"
   ./configure --host=$HOST --prefix=$P --disable-shared --enable-static --disable-harfbuzz \
     --disable-fontconfig --disable-require-system-font-provider --disable-asm >/dev/null
   make -j$J >/dev/null && make install DESTDIR=$D >/dev/null; mark libass; fi
