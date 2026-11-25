@@ -5770,6 +5770,8 @@ void App::resume_background(const std::string& video_id) {
     v.video_id = video_id;
     v.title = st["title"];
     v.author = st["channel"];
+    v.channel_id = st["channel_id"];
+    v.thumbnail_url = st["thumb_url"].empty() ? thumb_for(video_id) : st["thumb_url"];   // lost, the next background had no cover
     bg_resume_id_ = video_id;
     play_item(v, -1);
 }

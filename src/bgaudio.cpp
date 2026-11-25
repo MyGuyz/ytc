@@ -343,7 +343,8 @@ int bgaudio_main(const char* request_file) {
         std::snprintf(st, sizeof st, "state=%s\npos_ms=%d\ndur_ms=%d\n",
                       get_flag(mpv, "pause") ? "paused" : "playing", (int)(pos * 1000), (int)(dur * 1000));
         write_atomic(path("state"), st + ("id=" + cur.id + "\ntitle=" + cur.title + "\nchannel=" + cur.channel +
-                                          "\nthumb=" + cur.thumb + "\n"));
+                                          "\nthumb=" + cur.thumb + "\nchannel_id=" + cur.channel_id +
+                                          "\nthumb_url=" + cur.thumb_url + "\n"));
     }
     // Where the sound got to (the clip on now), for YouTube to reopen it there.
     char last[64];
